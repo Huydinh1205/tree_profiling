@@ -1,0 +1,36 @@
+# Only the processing code goes to GitHub. No data, no results.
+# Everything at the top level is ignored except these:
+/*
+!/.gitignore
+!/README.md
+!/processes/
+
+# Inside processes/: never commit outputs, examples or environments
+processes/results/
+processes/examples/
+processes/data/
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.nbi
+*.nbc
+.fuse_hidden*
+.DS_Store
+Thumbs.db
+
+# Point clouds, rasters and GIS outputs, wherever they are
+*.las
+*.laz
+*.copc.laz
+*.ply
+*.e57
+*.tif
+*.tiff
+*.gpkg
+*.shp
+*.shx
+*.dbf
+*.prj
+*.cpg
+*.zip
