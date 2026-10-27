@@ -63,7 +63,8 @@ REM ---- 5. Run ----
 :run
 echo.
 echo Working on %NAME% ... results will be in %CD%\%OUT%
-%PY% process2_segment.py "%LAS%" --out "%OUT%" --site-name "%NAME%" --models chm_watershed dalponte_py li2012_py %CROPARG%
+echo li2012 is slow: about 3 minutes for 3 million points, much longer for bigger files.
+%PY% process2_segment.py "%LAS%" --out "%OUT%" --site-name "%NAME%" --models chm_watershed dalponte_py li2012_py --allow-slow %CROPARG%
 if errorlevel 1 (
   echo.
   echo Something went wrong. Send a screenshot of this window to Ryan.

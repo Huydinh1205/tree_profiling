@@ -50,8 +50,9 @@ if [ -n "$CROP" ]; then OUT="results/${NAME}_crop${CROP}m"; CROPARG=(--crop-size
 # ---- 4. Run ----
 echo
 echo "Working on $NAME ... results will be in $(pwd)/$OUT"
+echo "li2012 is slow: about 3 minutes for 3 million points, much longer for bigger files."
 if .venv/bin/python process2_segment.py "$LAS" --out "$OUT" --site-name "$NAME" \
-     --models chm_watershed dalponte_py li2012_py "${CROPARG[@]}"; then
+     --models chm_watershed dalponte_py li2012_py --allow-slow "${CROPARG[@]}"; then
   open "$OUT/report.html"; open "$OUT"
   echo; echo "Done. The report has opened in your browser."
 else
