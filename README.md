@@ -15,8 +15,9 @@
 5. When it finishes, the report opens in your browser and the results folder opens
    (`processes/results/<file name>/`).
 
-The first run installs Python libraries and takes a few minutes. It needs Python 3.11
-(3.10 to 3.13 work, 3.14 does not). Data and results stay on your computer: nothing is uploaded.
+On Windows the .bat uses the machine's Python 3.10 directly (`py -3.10`, no venv).
+If a library is missing it installs `requirements.txt` once, which takes a few minutes.
+Python 3.10 to 3.13 work, 3.14 does not. Data and results stay on your computer: nothing is uploaded.
 
 The rest of this page is the manual way, with all options.
 

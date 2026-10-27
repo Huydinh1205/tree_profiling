@@ -3,18 +3,24 @@ setlocal
 cd /d "%~dp0"
 title Tree profiling
 
-REM ---- 1. One-time setup (Python 3.11 + libraries) ----
-if exist ".venv\Scripts\python.exe" goto ready
-echo First run: setting up Python and libraries. This takes a few minutes and only happens once.
-py -3.11 -m venv .venv
-if errorlevel 1 (
-  echo.
-  echo Python 3.11 was not found. Install Python 3.11 from python.org, then run this again.
-  pause
-  exit /b 1
-)
-.venv\Scripts\python.exe -m pip install --upgrade pip
-.venv\Scripts\python.exe -m pip install -r requirements.txt
+REM ---- 1. Find Python 3.10 (the company Python, no venv) ----
+set "PY="
+py -3.10 -c "import sys" >nul 2>&1 && set "PY=py -3.10"
+if defined PY goto havepy
+python -c "import sys; sys.exit(0 if (3,10) <= sys.version_info[:2] <= (3,13) else 1)" >nul 2>&1 && set "PY=python"
+if defined PY goto havepy
+echo Python 3.10 was not found. Ask Ryan to check the Python install on this machine.
+pause
+exit /b 1
+:havepy
+echo Using:
+%PY% -c "import sys; print(sys.executable, sys.version.split()[0])"
+
+REM ---- 2. Install the libraries only if something is missing ----
+%PY% -c "import laspy, lazrs, numpy, scipy, skimage, CSF, rasterio, geopandas, shapely, pyproj, matplotlib, plyfile, numba" >nul 2>&1
+if not errorlevel 1 goto ready
+echo Some libraries are missing. Installing them now (only happens once, a few minutes).
+%PY% -m pip install -r requirements.txt
 if errorlevel 1 (
   echo.
   echo Installing the libraries failed. Send a screenshot of this window to Ryan.
@@ -23,7 +29,7 @@ if errorlevel 1 (
 )
 :ready
 
-REM ---- 2. Which file? (dragged onto this .bat, or pasted) ----
+REM ---- 3. Which file? (dragged onto this .bat, or pasted) ----
 set "LAS=%~1"
 if defined LAS goto check
 :ask
@@ -41,7 +47,7 @@ goto ask
 :found
 for %%F in ("%LAS%") do set "NAME=%%~nF"
 
-REM ---- 3. Whole file or a test square? ----
+REM ---- 4. Whole file or a test square? ----
 echo.
 echo Press Enter to process the whole file.
 echo For a quick test on a big file, type a size in metres (for example 200) to use only a square in the middle.
@@ -49,15 +55,15 @@ set "CROP="
 set /p "CROP=Size (Enter = whole file): "
 set "OUT=results\%NAME%"
 set "CROPARG="
-if defined CROP (
-  set "OUT=results\%NAME%_crop%CROP%m"
-  set "CROPARG=--crop-size %CROP%"
-)
+if not defined CROP goto run
+set "OUT=results\%NAME%_crop%CROP%m"
+set "CROPARG=--crop-size %CROP%"
 
-REM ---- 4. Run ----
+REM ---- 5. Run ----
+:run
 echo.
 echo Working on %NAME% ... results will be in %CD%\%OUT%
-.venv\Scripts\python.exe process2_segment.py "%LAS%" --out "%OUT%" --site-name "%NAME%" --models chm_watershed dalponte_py li2012_py %CROPARG%
+%PY% process2_segment.py "%LAS%" --out "%OUT%" --site-name "%NAME%" --models chm_watershed dalponte_py li2012_py %CROPARG%
 if errorlevel 1 (
   echo.
   echo Something went wrong. Send a screenshot of this window to Ryan.
