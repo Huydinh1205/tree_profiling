@@ -110,3 +110,29 @@ The first run of `dalponte_py` / `li2012_py` takes ~10 s extra to compile.
 * Results go to `processes\results\benchmark_rmit\` (`report.md`, `scores_summary.csv`, figures).
 * Same `--models`, `--external` and `--allow-slow` options as process 2.
 * Pass its `scores_summary.csv` to process 2 with `--benchmark` to show accuracy in the site report.
+
+The RMIT benchmark data is in the repo as `.laz` (`data/RMIT/`, see its README):
+`train.laz` (159 trees), `test.laz` (64 trees) and `train_test.laz` (the whole plot, 222 trees).
+
+## 4. Process 3: where does the segmentation go wrong?
+
+```powershell
+.venv\Scripts\python.exe process3_errors.py ..\data\RMIT\train_test.laz --bench results\benchmark_rmit_all --out results\errors_rmit_all
+```
+
+* Needs the `predictions\` folder written by process 1 (`--bench` = its `--out`).
+* Sorts every labelled tree into `ok`, `merged` (several trees found as one), `split` (one tree found as
+  several), `missed` (points left unassigned) or `boundary` (right tree, wrong outline), and every
+  predicted tree into `ok`, `merge`, `fragment`, `ground/noise` or `boundary`.
+* Writes `report.md`, `summary.csv`, one `errors_<model>.csv` with the x, y of every labelled tree and its
+  error type, and `fig_errors_<model>.png` (map of the error types).
+
+## 5. Merge labelled files
+
+```powershell
+.venv\Scripts\python.exe merge_labelled.py ..\data\RMIT\train.laz ..\data\RMIT\test.laz --out ..\data\RMIT\train_test.laz
+```
+
+Keeps classification and treeID, removes points with identical coordinates (RMIT train and test
+overlap at the border and train has internal duplicates). Add `--shift-ids` for files from
+different plots whose tree IDs would collide.

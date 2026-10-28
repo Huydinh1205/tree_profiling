@@ -34,3 +34,14 @@ Thumbs.db
 *.prj
 *.cpg
 *.zip
+
+# Exception: the small public RMIT benchmark data (FOR-instance, CC BY 4.0) as LAZ
+!/data/
+/data/*
+!/data/RMIT/
+/data/RMIT/*
+!/data/RMIT/train.laz
+!/data/RMIT/test.laz
+!/data/RMIT/train_test.laz
+!/data/RMIT/tree_data_RMIT.csv
+!/data/RMIT/README.md
