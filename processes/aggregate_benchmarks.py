@@ -75,11 +75,80 @@ def fig_errors(err, path):
     fig.tight_layout(); fig.savefig(path, dpi=110); plt.close(fig)
 
 
+
+GALLERY_CSS = (".gal{display:flex;flex-wrap:wrap;gap:10px;margin:8px 0 18px}.gal figure{margin:0;width:270px}"
+               ".gal.big figure{width:420px}.gal img{width:100%;border:1px solid #ddd}"
+               ".gal figcaption{font-size:12px;color:#444;margin-top:2px}details{margin:6px 0}"
+               "summary{cursor:pointer;font-weight:600;color:#1F3864;padding:4px 0}")
+
+
+def _img(path, cap, max_w=900):
+    """Embed as JPEG (scatter plots are 5 to 10 times smaller than PNG), scaled to max_w pixels wide."""
+    import base64, html as H, io
+    from PIL import Image
+    im = Image.open(path).convert("RGB")
+    if im.width > max_w: im = im.resize((max_w, round(im.height * max_w / im.width)), Image.LANCZOS)
+    buf = io.BytesIO(); im.save(buf, "JPEG", quality=78, optimize=True)
+    b = base64.b64encode(buf.getvalue()).decode()
+    return f'<figure><img alt="{H.escape(cap)}" src="data:image/jpeg;base64,{b}"><figcaption>{H.escape(cap)}</figcaption></figure>'
+
+
+def pictures(a, folder, plots, models):
+    """HTML for the two picture sections: plot views and right/wrong examples."""
+    import html as H
+    import examples as X
+    lab_dir = Path(a.labelled_dir)
+    by_plot = defaultdict(dict)
+    for p in plots: by_plot[p["plot"]][p["model"]] = p
+    # one plot per drone region: the one with most reference trees
+    best = {}
+    for name, ms in by_plot.items():
+        reg = region_of(name)
+        if reg in NON_DRONE: continue
+        n = next(iter(ms.values()))["gt"]
+        if reg not in best or n > best[reg][1]: best[reg] = (name, n)
+    order = sorted(best, key=lambda r: (r != "RMIT", r))[:a.view_plots]
+    out = ["<h2>Pictures</h2>",
+           "<p>Top views of one plot per region: each image is one result, every tree in its own colour, grey = not assigned to any tree. "
+           "Click a plot to open it.</p>"]
+    for k, reg in enumerate(order):
+        name = best[reg][0]; pdir = folder / name
+        las = next((q for q in [lab_dir / f"{name}.las", lab_dir / f"{name}.laz"] if q.exists()), None)
+        if las is None or not (pdir / "predictions").exists(): continue
+        keymap = {}
+        for f in (pdir / "predictions").glob("*.npy"):
+            lab = T.model_label(f.stem); keymap[f.stem] = by_plot[name].get(lab, {})
+        print(f"  pictures: {name}")
+        imgs = X.plot_views(las, pdir / "predictions", folder / "views" / name, keymap)
+        ef = sorted((pdir / "errors").glob("fig_errors_*.png"))
+        out.append(f"<details{' open' if k == 0 else ''}><summary>{H.escape(reg)}: {H.escape(name)} "
+                   f"({best[reg][1]} trees; {H.escape(REGION_INFO.get(reg, ''))})</summary>")
+        out.append('<div class="gal">' + "".join(_img(p, c, 600) for p, c in imgs) + "</div>")
+        if ef:
+            out.append("<p>Error maps (reference tree tops coloured by error type):</p>")
+            out.append('<div class="gal big">' + "".join(_img(f, T.model_label(f.stem[len("fig_errors_"):])) for f in ef) + "</div>")
+        out.append("</details>")
+    print("  pictures: examples")
+    ex = X.examples([folder / p for p in by_plot], lab_dir, folder / "examples")
+    out += ["<h2>Examples: right and wrong</h2>",
+            "<p>Randomly chosen reference trees from the drone plots (taller than 4 m, at least 150 points), for each model: "
+            "2 found correctly, then the error types. Top row seen from above, bottom row from the side. "
+            "<b>Red</b> on the left is the reference tree; <b>red</b> on the right is the predicted tree that took most of its points "
+            "(for a merged tree it also covers the neighbours). Grey = not assigned to any tree.</p>"]
+    for k, (m, items) in enumerate(ex.items()):
+        if not items: continue
+        out.append(f"<details{' open' if k == 0 else ''}><summary>{H.escape(T.model_label(m))}</summary>"
+                   '<div class="gal big">' + "".join(_img(p, c) for p, c in items) + "</div></details>")
+    return "\n".join(out) + "\n"
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("folders", nargs="+", help="process 1 output folders, one per plot")
     ap.add_argument("--out", default="summary.md")
     ap.add_argument("--title", default="Tree segmentation evaluation")
+    ap.add_argument("--labelled-dir", help="folder with the labelled plots (.las); enables the pictures")
+    ap.add_argument("--view-plots", type=int, default=7, help="number of plots shown with one image per model (one per region)")
+    ap.add_argument("--no-pictures", action="store_true")
     a = ap.parse_args()
     out_md = Path(a.out); folder = out_md.parent; folder.mkdir(parents=True, exist_ok=True)
     acc = defaultdict(lambda: dict(gt=0, pred=0, matched=0, f1s=[], plots=0, secs=0.0, det=[]))
@@ -150,7 +219,7 @@ def main():
     if err:
         er = [dict(model=m, **{k: err[m][k] for k in ERR}, total=sum(err[m].values()),
                    over=f"{err_over[m][0]}/{err_over[m][1]}" if err_over[m][1] else "n/a") for m in err]
-        md += ["\n## What goes wrong (process 3)\n",
+        md += ["\n## What goes wrong (process 3, all plots)\n",
                "Every reference tree is put in one class: `ok` found correctly; `merged` came out together with neighbours as one tree; "
                "`split` came out as several trees; `missed` its points were left unassigned; `boundary` right tree, wrong outline.\n",
                "![error types](fig_error_types.png)\n",
@@ -166,12 +235,21 @@ def main():
            "- Published on the full-resolution FOR-instanceV2 test set (same rule): SegmentAnyTree v1 about 0.75 (RMIT), "
            "ForestFormer3D 0.82 to 0.84, SegmentAnyTreeV2 0.85. Thinning makes every model worse, so compare models within this report.\n",
            "- No model here saw these plots during tuning, except that the classical models' parameters were chosen on RMIT train.\n"]
+    gallery = ""
+    if a.labelled_dir and not a.no_pictures:
+        gallery = pictures(a, folder, plots, models)
+        md.insert(md.index("\n## Per plot\n"), "\n## Pictures\nSee report.html (plot views in `views/`, examples in `examples/`).\n")
     text = "\n".join(p.rstrip("\n") + "\n" for p in md)
     out_md.write_text(text, encoding="utf-8")
     with open(out_md.with_suffix(".csv"), "w", newline="") as f:
         w = csv.DictWriter(f, list(rows[0].keys())); w.writeheader(); w.writerows(rows)
     from process2_segment import html_from_md
     html = html_from_md(text, folder).replace("<title>Tree profiling report</title>", f"<title>{a.title}</title>")
+    if gallery:
+        cut = html.find("<h2>Pictures</h2>")
+        end = html.find("<h2>", cut + 5)
+        html = html[:cut] + gallery + html[end:]
+        html = html.replace("</style>", GALLERY_CSS + "</style>")
     (folder / "report.html").write_text(html, encoding="utf-8")
     for r in allrows:
         print(f"{r['model']:32s} pooled F1 {r['f1']:.2f} (P {r['precision']:.2f} R {r['recall']:.2f}) on {r['gt']} trees")

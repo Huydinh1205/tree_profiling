@@ -69,7 +69,7 @@ def main():
         if changed or not (dst / "errors" / "summary.csv").exists():
             run([py, str(here / "process3_errors.py"), str(f), "--bench", str(dst), "--out", str(dst / "errors")], log)
     cmd = [py, str(here / "aggregate_benchmarks.py"), *[str(p) for p in sorted(out.iterdir()) if p.is_dir()],
-           "--out", str(out / "summary.md")] + (["--title", a.title] if a.title else [])
+           "--out", str(out / "summary.md"), "--labelled-dir", str(Path(a.folder))] + (["--title", a.title] if a.title else [])
     subprocess.run(cmd)
     print(f"\nOpen {out / 'report.html'}")
 
