@@ -167,13 +167,41 @@ echo   %NAME%: %CD%\%OUT%\report.html
 start "" "%OUT%\report.html"
 exit /b 0
 
+:download
+REM %1 = file, %2 = URL, %3 = size in bytes on Zenodo. Downloads to <file>.part and renames it only when the size is
+REM right, so a cut download is never mistaken for a finished one (an older cut file is moved back to .part and resumed).
+REM If Zenodo drops the connection, waits and resumes where it stopped (up to 20 tries).
+set "SZ="
+if exist "%~1" for %%F in ("%~1") do set "SZ=%%~zF"
+if "%SZ%"=="%~3" exit /b 0
+if defined SZ echo   %~nx1 is incomplete ^(%SZ% of %~3 bytes^), resuming the download...
+if defined SZ if not exist "%~1.part" move /y "%~1" "%~1.part" >nul
+if defined SZ if exist "%~1" del "%~1"
+set "TRY=0"
+:download_try
+set /a TRY+=1
+curl.exe -L --fail -C - -o "%~1.part" "%~2"
+set "SZ="
+for %%F in ("%~1.part") do set "SZ=%%~zF"
+if "%SZ%"=="%~3" goto download_ok
+if %TRY% GEQ 20 goto download_fail
+echo   Connection dropped, resuming in 15 seconds ^(try %TRY% of 20^)...
+timeout /t 15 /nobreak >nul
+goto download_try
+:download_fail
+echo Download of %~nx1 failed 20 times. Check the internet connection and run this .bat again: it resumes.
+exit /b 1
+:download_ok
+move /y "%~1.part" "%~1" >nul || exit /b 1
+exit /b 0
+
 :prep_v2
 if exist "%V2%\plots_100\*.las" exit /b 0
 if exist "%V2%\test_data\*.ply" goto v2_unzipped
 if exist "%V2%\test_data.zip" goto v2_unzip
 echo Downloading the FOR-instanceV2 test plots (0.4 GB)...
 mkdir "%V2%" 2>nul
-curl.exe -L -C - -o "%V2%\test_data.zip" "https://zenodo.org/api/records/16742708/files/test_data.zip/content" || exit /b 1
+call :download "%V2%\test_data.zip" "https://zenodo.org/api/records/16742708/files/test_data.zip/content" 377105598 || exit /b 1
 :v2_unzip
 echo Unzipping...
 powershell -NoProfile -Command "Expand-Archive -Force '%V2%\test_data.zip' '%V2%'" || exit /b 1
@@ -185,12 +213,10 @@ exit /b 0
 :prep_syn
 if exist "%SYN%\plots_100\*.las" exit /b 0
 mkdir "%SYN%" 2>nul
-for %%S in (WoodLand OpenForest ClosedForest) do (
-  if not exist "%SYN%\%%S.pcd" (
-    echo Downloading Synthetic Forest %%S.pcd ^(about 3 GB^)...
-    curl.exe -L -C - -o "%SYN%\%%S.pcd" "https://zenodo.org/api/records/17568131/files/%%S.pcd/content" || exit /b 1
-  )
-)
+echo Synthetic Forest: 3 scenes of about 3 GB each (skipped when already complete)...
+call :download "%SYN%\WoodLand.pcd" "https://zenodo.org/api/records/17568131/files/WoodLand.pcd/content" 2519321570 || exit /b 1
+call :download "%SYN%\OpenForest.pcd" "https://zenodo.org/api/records/17568131/files/OpenForest.pcd/content" 2859047883 || exit /b 1
+call :download "%SYN%\ClosedForest.pcd" "https://zenodo.org/api/records/17568131/files/ClosedForest.pcd/content" 3180388832 || exit /b 1
 echo Preparing the 3 synthetic scenes at 100 pts/m2 (40 million lines each, a few minutes per scene)...
 %PY% prep_labelled.py "%SYN%\*.pcd" --out "%SYN%\plots_100" --density 100 || exit /b 1
 exit /b 0
@@ -201,7 +227,7 @@ if exist "%CED%\Kokonoe\plot_1\Kokonoe_ULS_plot-1.las" goto ced_unzipped
 if exist "%CED%\CedarCypress3D_data.zip" goto ced_unzip
 echo Downloading CedarCypress3D (3 GB)...
 mkdir "%CED%" 2>nul
-curl.exe -L -C - -o "%CED%\CedarCypress3D_data.zip" "https://zenodo.org/api/records/22168721/files/CedarCypress3D_data.zip/content" || exit /b 1
+call :download "%CED%\CedarCypress3D_data.zip" "https://zenodo.org/api/records/22168721/files/CedarCypress3D_data.zip/content" 3002103950 || exit /b 1
 :ced_unzip
 echo Unzipping the drone point clouds and field data (the terrestrial scans and photos are skipped)...
 %PY% -c "import sys, zipfile; z = zipfile.ZipFile(sys.argv[1]); [z.extract(n, sys.argv[2]) for n in z.namelist() if '_ULS_' in n or n.endswith(('.csv', '.xlsx', 'README.txt'))]" "%CED%\CedarCypress3D_data.zip" "%CED%" || exit /b 1
