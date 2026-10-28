@@ -451,7 +451,7 @@ def tree_table(cloud: Cloud, ids, res=0.5, voxel=0.5):
         cr = H >= base
         xyz = np.c_[X[cr], Y[cr], H[cr]]
         try:
-            vol = float(ConvexHull(xyz).volume) if len(xyz) >= 5 else 0.0
+            vol = float(ConvexHull(xyz, qhull_options="QJ").volume) if len(xyz) >= 5 else 0.0
         except QhullError:
             vol = 0.0
         occ = np.unique(np.floor(xyz / voxel).astype(np.int64), axis=0)
@@ -460,12 +460,15 @@ def tree_table(cloud: Cloud, ids, res=0.5, voxel=0.5):
         dens = None
         if vol > 0:
             from scipy.spatial import Delaunay
-            lo, hi = occ.min(0), occ.max(0)
-            g = np.stack(np.meshgrid(*[np.arange(l, h_ + 1) for l, h_ in zip(lo, hi)], indexing="ij"), -1).reshape(-1, 3)
-            inside = Delaunay(xyz).find_simplex((g + 0.5) * voxel) >= 0
-            occ_set = np.zeros(len(g), bool)
-            occ_set[np.ravel_multi_index((occ - lo).T, tuple(hi - lo + 1))] = True
-            dens = 100.0 * occ_set.sum() / max((inside | occ_set).sum(), 1)
+            try:
+                lo, hi = occ.min(0), occ.max(0)
+                g = np.stack(np.meshgrid(*[np.arange(l, h_ + 1) for l, h_ in zip(lo, hi)], indexing="ij"), -1).reshape(-1, 3)
+                inside = Delaunay(xyz, qhull_options="QJ").find_simplex((g + 0.5) * voxel) >= 0
+                occ_set = np.zeros(len(g), bool)
+                occ_set[np.ravel_multi_index((occ - lo).T, tuple(hi - lo + 1))] = True
+                dens = 100.0 * occ_set.sum() / max((inside | occ_set).sum(), 1)
+            except (QhullError, ValueError, MemoryError):
+                dens = None                                   # degenerate or huge crown: fall back below
         xy = np.c_[X[up], Y[up]]
         wmax, elong = np.nan, np.nan
         if len(xy) >= 3:
