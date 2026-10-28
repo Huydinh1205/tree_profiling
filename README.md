@@ -139,7 +139,7 @@ different plots whose tree IDs would collide.
 
 ## 6. Benchmark on many labelled plots (FOR-instanceV2, Synthetic Forest)
 
-Easiest: double-click `processes\run_benchmark_v2.bat`, twice.
+Easiest: double-click `processes\run_benchmark_v2.bat`, twice. It first asks which labelled data to use: FOR-instanceV2 (29 real drone plots), Synthetic Forest (3 simulated eucalypt scenes, 8.6 GB download, report in `results\synthetic_100`) or both, then which models.
 
 1. **Run 1** downloads the FOR-instanceV2 test plots if needed (0.4 GB), converts them to 100 pts/m2, makes one file with all
    plots for SegmentAnyTree (`data\FOR-instanceV2\mosaic_100\mosaic_unlabelled.laz`), opens that folder and usegalaxy.eu,

@@ -1,4 +1,4 @@
-"""Prepare labelled plots for benchmarking: convert FOR-instanceV2 .ply (or FOR-instance .las)
+"""Prepare labelled plots for benchmarking: convert FOR-instanceV2 .ply, Synthetic Forest .pcd (or FOR-instance .las)
 to labelled .las, optionally thinned to a target point density (to mimic our DJI L2 data,
 about 50 to 100 pts/m2) and with z shifted so the lowest ground point is 0.
 
@@ -8,6 +8,12 @@ process 3 read it directly.
 Usage:
   python prep_labelled.py test_data/*.ply --out plots_full
   python prep_labelled.py test_data/*.ply --out plots_100 --density 100
+  python prep_labelled.py SyntheticForest/*.pcd --out syn_100 --density 100
+
+Synthetic Forest .pcd (Pourdelan et al., Zenodo 17568131): classification 1 ground, 2 wood, 3 leaves,
+4 deadwood, 5 rock, 6 stump, 7 bush; `instance` = one ID per tree (wood + leaves). Trees (2, 3) keep their
+instance as treeID; ground becomes class 2; deadwood, rocks, stumps and bushes are kept as other points (treeID 0).
+The files are ~40 million text lines each: they are read in chunks and, with --density, thinned while reading.
 """
 import argparse
 from pathlib import Path
@@ -24,8 +30,52 @@ def expand(paths):
         out += hits if hits else [p]
     return out
 
-def load(path):
+def load_pcd(p, density=None, seed=0):
+    """Synthetic Forest .pcd (ASCII or binary). Thinned while reading when density is given (scenes are 1 ha)."""
+    import pandas as pd
+    head, n_head = {}, 0
+    with open(p, "rb") as fh:
+        for raw in fh:
+            n_head += 1; line = raw.decode("ascii", "replace").strip()
+            if not line or line.startswith("#"): continue
+            k, *v = line.split(); head[k.upper()] = v
+            if k.upper() == "DATA": break
+        offset = fh.tell() if head["DATA"][0] != "ascii" else None
+    fields = head["FIELDS"]; npts = int(head["POINTS"][0])
+    need = ["x", "y", "z", "classification", "instance"]
+    miss = [f for f in need if f not in fields]
+    if miss: raise SystemExit(f"{p}: missing fields {miss}; has {fields}")
+    keep_p = 1.0
+    if density:                                  # pre-thin to 3x the target assuming >= 1 ha; exact thinning happens later
+        keep_p = min(1.0, 3 * density * 10_000 / npts)
+    rng = np.random.default_rng(seed); parts = []
+    if offset is None:
+        reader = pd.read_csv(p, sep=" ", header=None, names=fields, usecols=need, skiprows=n_head, dtype=np.float64,
+                             chunksize=4_000_000, engine="c")
+        for k, ch in enumerate(reader):
+            a = ch[need].to_numpy()
+            if keep_p < 1: a = a[rng.random(len(a)) < keep_p]
+            parts.append(a); print(f"  {Path(p).name}: read {min((k + 1) * 4_000_000, npts):,} / {npts:,} lines", end="\r", flush=True)
+        print()
+    else:
+        tmap = {("F", "4"): "f4", ("F", "8"): "f8", ("I", "4"): "i4", ("U", "4"): "u4", ("I", "2"): "i2", ("U", "2"): "u2",
+                ("U", "1"): "u1", ("I", "1"): "i1"}
+        dt = np.dtype([(f, tmap[(t, s)]) for f, t, s in zip(fields, head["TYPE"], head["SIZE"])])
+        a = np.fromfile(p, dtype=dt, count=npts, offset=offset)
+        if keep_p < 1: a = a[rng.random(len(a)) < keep_p]
+        parts.append(np.c_[[a[f].astype(float) for f in need]].T)
+    a = np.concatenate(parts)
+    x, y, z, c, inst = a.T
+    c = c.astype(int); tree = (c == 2) | (c == 3)
+    t = np.where(tree, inst.astype(np.int64) + 1, 0)            # +1 so an instance 0 tree is not lost
+    cls = np.where(c == 1, 2, np.where(tree, 5, 1)).astype(np.uint8)
+    return x, y, z, cls, t, None
+
+
+def load(path, density=None):
     p = Path(path)
+    if p.suffix.lower() == ".pcd":
+        return load_pcd(p, density)
     if p.suffix.lower() == ".ply":
         from plyfile import PlyData
         v = PlyData.read(str(p))["vertex"].data
@@ -60,7 +110,7 @@ def main():
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(a.seed)
     for f in expand(a.files):
-        x, y, z, cls, t, crs = load(f)
+        x, y, z, cls, t, crs = load(f, a.density)
         area = (x.max() - x.min()) * (y.max() - y.min()); dens = len(x) / area
         keep = np.ones(len(x), bool)
         if a.density and dens > a.density:

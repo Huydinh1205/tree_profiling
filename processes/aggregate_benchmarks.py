@@ -25,6 +25,9 @@ REGION_INFO = {
     "TUWIEN": "Austria, mixed broadleaf (ULS)",
     "Yuchen": "China, broadleaf (DLS)",
     "BlueCat": "Czechia, merged TLS single trees (no terrain; ground added)",
+    "WoodLand": "Synthetic eucalypt woodland, 38% canopy cover (HELIOS++ ULS)",
+    "OpenForest": "Synthetic eucalypt open forest, 63% canopy cover (HELIOS++ ULS)",
+    "ClosedForest": "Synthetic eucalypt closed forest, 84% canopy cover (HELIOS++ ULS)",
 }
 ERR = ["ok", "merged", "split", "missed", "boundary"]
 NON_DRONE = {"BlueCat", "NIBIO_MLS"}          # ground-based scans: shown, but left out of the "drone" total
@@ -232,8 +235,9 @@ def main():
                        ("F1", "f1"), ("Tree-top detection F1", "det_f1"), ("s", "seconds")], {"f1": "{:.2f}", "det_f1": "{:.2f}", "seconds": "{:.0f}"}),
            "\n## Notes\n",
            "- Point clouds were thinned to the density in the folder name (e.g. plots_100 = 100 pts/m2) to look like our DJI L2 data.\n",
-           "- Published on the full-resolution FOR-instanceV2 test set (same rule): SegmentAnyTree v1 about 0.75 (RMIT), "
+           "- For reference, published on the full-resolution FOR-instanceV2 test set (same rule): SegmentAnyTree v1 about 0.75 (RMIT), "
            "ForestFormer3D 0.82 to 0.84, SegmentAnyTreeV2 0.85. Thinning makes every model worse, so compare models within this report.\n",
+           "- Synthetic Forest scenes are simulated (HELIOS++), cleaner than real scans; use them to rank models, not to predict accuracy on our data.\n",
            "- No model here saw these plots during tuning, except that the classical models' parameters were chosen on RMIT train.\n"]
     gallery = ""
     if a.labelled_dir and not a.no_pictures:
