@@ -7,6 +7,7 @@ set "D=..\data"
 mkdir "%D%\FOR-instanceV2" 2>nul
 mkdir "%D%\SyntheticForest" 2>nul
 mkdir "%D%\FOR-instance" 2>nul
+mkdir "%D%\CedarCypress3D" 2>nul
 
 echo === FOR-instanceV2 (Zenodo 16742708, GPL-3.0): labelled test plots 0.4 GB, train/val 2.4 GB
 curl.exe -L -C - -o "%D%\FOR-instanceV2\test_data.zip"      "https://zenodo.org/api/records/16742708/files/test_data.zip/content"
@@ -17,10 +18,13 @@ curl.exe -L -C - -o "%D%\SyntheticForest\WoodLand.pcd"     "https://zenodo.org/a
 curl.exe -L -C - -o "%D%\SyntheticForest\OpenForest.pcd"   "https://zenodo.org/api/records/17568131/files/OpenForest.pcd/content"
 curl.exe -L -C - -o "%D%\SyntheticForest\ClosedForest.pcd" "https://zenodo.org/api/records/17568131/files/ClosedForest.pcd/content"
 
+echo === CedarCypress3D (Zenodo 22168721, CC BY 4.0): 34 labelled drone plots, Japanese cedar / cypress, 3 GB
+curl.exe -L -C - -o "%D%\CedarCypress3D\CedarCypress3D_data.zip" "https://zenodo.org/api/records/22168721/files/CedarCypress3D_data.zip/content"
+
 echo === FOR-instance v1 (Zenodo 8287792, CC BY 4.0): whole dataset 1.6 GB (RMIT alone is already in data\RMIT)
 curl.exe -L -C - -o "%D%\FOR-instance\FORinstance_dataset.zip" "https://zenodo.org/api/records/8287792/files/FORinstance_dataset.zip/content"
 
 echo.
-echo Done. Unzip the two FOR-instance zips in place. Then, for example:
+echo Done. Unzip the FOR-instance and CedarCypress3D zips in place (or let run_benchmark_v2.bat do it). Then, for example:
 echo   python prep_labelled.py ..\data\FOR-instanceV2\test_data\*.ply --out ..\data\FOR-instanceV2\plots_100 --density 100
 pause

@@ -1,14 +1,19 @@
-"""Prepare labelled plots for benchmarking: convert FOR-instanceV2 .ply, Synthetic Forest .pcd (or FOR-instance .las)
-to labelled .las, optionally thinned to a target point density (to mimic our DJI L2 data,
-about 50 to 100 pts/m2) and with z shifted so the lowest ground point is 0.
+"""Prepare labelled plots for benchmarking: convert FOR-instanceV2 .ply, Synthetic Forest .pcd, CedarCypress3D .las
+(or FOR-instance .las) to labelled .las, optionally thinned to a target point density (to mimic our DJI L2 data,
+about 100 pts/m2) and with z shifted so the lowest ground point is 0.
 
 Output .las has: classification (2 ground, 5 tree, 1 other) and treeID, so process 1 and
-process 3 read it directly.
+process 3 read it directly. (FOR-instance v1 .las keeps its own classes 0-6.)
 
 Usage:
   python prep_labelled.py test_data/*.ply --out plots_full
   python prep_labelled.py test_data/*.ply --out plots_100 --density 100
   python prep_labelled.py SyntheticForest/*.pcd --out syn_100 --density 100
+  python prep_labelled.py "CedarCypress3D/*/plot_*/*_ULS_*.las" --out CedarCypress3D/plots_100 --density 100
+
+CedarCypress3D (Zenodo 22168721): 34 circular plots (radius about 12 m) in Japanese cedar / cypress plantations,
+each in a 36 x 36 m tile. Trees with their stem in the plot are labelled (treeID); trees outside are class 1 and
+not scored. Kokonoe = DJI Zenmuse L2 (same sensor as ours), Saiki = RIEGL VUX-1LR. Only the drone (ULS) files are used.
 
 Synthetic Forest .pcd (Pourdelan et al., Zenodo 17568131): classification 1 ground, 2 wood, 3 leaves,
 4 deadwood, 5 rock, 6 stump, 7 bush; `instance` = one ID per tree (wood + leaves). Trees (2, 3) keep their
@@ -84,8 +89,15 @@ def load(path, density=None):
         cls = np.where(sem == 1, 2, np.where(t > 0, 5, 1)).astype(np.uint8)
         return x, y, z, cls, t, None
     L = laspy.read(p)
-    return (np.asarray(L.x), np.asarray(L.y), np.asarray(L.z), np.asarray(L.classification),
-            np.asarray(L.treeID).astype(np.int64), L.header.parse_crs())
+    x, y, z = np.asarray(L.x), np.asarray(L.y), np.asarray(L.z)
+    cls = np.asarray(L.classification); t = np.asarray(L.treeID).astype(np.int64)
+    if "treeComponent" in L.point_format.extra_dimension_names:
+        # CedarCypress3D: 1 outside plot, 2 ground, 3 low vegetation, 5 labelled tree, 7 noise.
+        # Noise is dropped; everything that is not ground or a labelled tree becomes "other" (1).
+        k = cls != 7
+        x, y, z, cls, t = x[k], y[k], z[k], cls[k], t[k]
+        cls = np.where(cls == 2, 2, np.where(t > 0, 5, 1)).astype(np.uint8)
+    return x, y, z, cls, t, L.header.parse_crs()
 
 
 def write(path, x, y, z, cls, t, crs=None):
@@ -133,7 +145,7 @@ def main():
         if not a.keep_z:
             g = (cls == 2) & keep
             z = z - (np.percentile(z[g], 1) if g.any() else z[keep].min())
-        name = Path(f).stem.replace("_annotated_test", "").replace("_test", "").replace("_panoptic", "")
+        name = Path(f).stem.replace("_annotated_test", "").replace("_test", "").replace("_panoptic", "").replace("_ULS_", "_")
         write(out / f"{name}.las", x[keep], y[keep], z[keep], cls[keep], t[keep], crs)
         nt = len(np.unique(t[keep][t[keep] > 0]))
         print(f"{name}: {len(x):,} -> {keep.sum():,} pts ({dens:.0f} -> {keep.sum() / area:.0f} pts/m2), {nt} trees")

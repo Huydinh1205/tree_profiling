@@ -137,20 +137,28 @@ Keeps classification and treeID, removes points with identical coordinates (RMIT
 overlap at the border and train has internal duplicates). Add `--shift-ids` for files from
 different plots whose tree IDs would collide.
 
-## 6. Benchmark on many labelled plots (FOR-instanceV2, Synthetic Forest)
+## 6. Benchmark on many labelled plots (FOR-instanceV2, Synthetic Forest, CedarCypress3D)
 
-Easiest: double-click `processes\run_benchmark_v2.bat`, twice. It asks which labelled data (Enter = both FOR-instanceV2, 29 real
-drone plots, and Synthetic Forest, 3 simulated eucalypt scenes; `1` = FOR-instanceV2 only; `2` = Synthetic Forest only) and which
-models (Enter = 3, `F` = fast). Whatever you choose, there is **one report**: `processes\results\benchmark_100\report.html`,
-with F1 for real drone plots, synthetic plots and all plots side by side.
+Easiest: double-click `processes\run_benchmark_v2.bat`, twice. It asks which labelled data and which models
+(Enter = 3, `F` = fast). **Each dataset gets its own report**:
 
-1. **Run 1** downloads what is missing (0.4 GB FOR-instanceV2, 8.6 GB Synthetic Forest), converts it to 100 pts/m2, makes **one**
-   file with all selected plots for SegmentAnyTree (`data\mosaic_all_100\mosaic_unlabelled.laz`, or `mosaic_v2_100` /
-   `mosaic_syn_100`), opens that folder and usegalaxy.eu, then runs the classical models on this computer.
-2. **Meanwhile on usegalaxy.eu**: upload `mosaic_unlabelled.laz`, run "3DTrees: SegmentAnyTree", download the result and put it
-   in the same mosaic folder, keeping Galaxy's file name (e.g. `Galaxy5-[Processed Files].zip`, it is really a LAZ).
-3. If the Galaxy file is already there when the models finish, it is added straight away. Otherwise **run 2** (same choices)
+| Choice | Dataset | Report |
+|---|---|---|
+| `1` | FOR-instanceV2: real drone plots (Norway, Czechia, Austria, NZ, Australia RMIT, tropical) + 2 ground-based, 0.4 GB | `results\benchmark_v2_100\report.html` |
+| `2` | Synthetic Forest: 3 simulated eucalypt scenes (HELIOS++), 8.6 GB | `results\benchmark_syn_100\report.html` |
+| `3` | CedarCypress3D: 34 real drone plots, Japanese cedar / cypress plantations; Kokonoe = DJI Zenmuse L2 (our sensor), Saiki = RIEGL, 3 GB | `results\benchmark_ced_100\report.html` |
+| Enter | all three, one after the other (or type several, e.g. `13`) | one report each |
+
+1. **Run 1** downloads what is missing, converts it to 100 pts/m2 (`data\<dataset>\plots_100`), makes **one** file per dataset
+   for SegmentAnyTree (`data\mosaic_v2_100`, `mosaic_syn_100`, `mosaic_ced_100`, each with `mosaic_unlabelled.laz`), opens
+   those folders and usegalaxy.eu, then runs the classical models on this computer.
+2. **Meanwhile on usegalaxy.eu**: for each mosaic folder, upload its `mosaic_unlabelled.laz`, run "3DTrees: SegmentAnyTree",
+   download the result and put it in the same folder, keeping Galaxy's file name (e.g. `Galaxy5-[Processed Files].zip`,
+   it is really a LAZ).
+3. If a Galaxy file is already there when the models finish, it is added straight away. Otherwise **run 2** (same choices)
    skips what is done and only adds SegmentAnyTree.
+
+The old single folder `results\benchmark_100` (FOR-instanceV2 only) is renamed to `results\benchmark_v2_100` on the first run.
 
 The report has: F1 per data group, F1 by region, error types, one image per model for one plot per region, and right/wrong
 close-ups for every model.
@@ -159,13 +167,14 @@ Manual steps:
 
 ```powershell
 cd tree_profiling\processes
-.\download_datasets.bat                                  # once, about 13 GB into ..\data\
+.\download_datasets.bat                                  # once, about 16 GB into ..\data\
 Expand-Archive ..\data\FOR-instanceV2\test_data.zip ..\data\FOR-instanceV2
 py -3.10 prep_labelled.py "..\data\FOR-instanceV2\test_data\*.ply" --out ..\data\FOR-instanceV2\plots_100 --density 100
 py -3.10 benchmark_folder.py ..\data\FOR-instanceV2\plots_100 --out results\v2_100
 ```
 
-* `prep_labelled.py` turns each labelled `.ply` into a labelled `.las` thinned to 100 pts/m2 (close to our DJI L2).
+* `prep_labelled.py` turns each labelled `.ply` / `.pcd` / CedarCypress3D `.las` into a labelled `.las` thinned to 100 pts/m2
+  (close to our DJI L2), e.g. `py -3.10 prep_labelled.py "..\data\CedarCypress3D\*\plot_*\*_ULS_*.las" --out ..\data\CedarCypress3D\plots_100 --density 100`.
   Drop `--density` to keep full resolution (much slower for li2012).
 * `benchmark_folder.py` runs process 1 on every plot (skips plots already done, so it can be stopped and re-run)
   and writes `results\v2_100\summary.md`: pooled precision / recall / F1 per model, per region and overall.

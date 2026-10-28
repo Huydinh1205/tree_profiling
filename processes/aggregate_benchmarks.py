@@ -28,7 +28,10 @@ REGION_INFO = {
     "WoodLand": "Synthetic eucalypt woodland, 38% canopy cover (HELIOS++ ULS)",
     "OpenForest": "Synthetic eucalypt open forest, 63% canopy cover (HELIOS++ ULS)",
     "ClosedForest": "Synthetic eucalypt closed forest, 84% canopy cover (HELIOS++ ULS)",
+    "Kokonoe": "Japan, cedar / cypress plantation (DJI Zenmuse L2, the same sensor as ours)",
+    "Saiki": "Japan, cedar / cypress plantation (RIEGL VUX-1LR ULS)",
 }
+CEDAR = {"Kokonoe", "Saiki"}
 ERR = ["ok", "merged", "split", "missed", "boundary"]
 NON_DRONE = {"BlueCat", "NIBIO_MLS"}          # ground-based scans: shown, but left out of the "drone" totals
 SYNTHETIC = {"WoodLand", "OpenForest", "ClosedForest"}
@@ -229,7 +232,7 @@ def main():
           T.md_table(comp, [("Model", "model")] + gcols),
           "\nPrecision = share of predicted trees that are correct. Recall = share of reference trees found. "
           "F1 combines both (1 = perfect). " + " ".join(t for g, t in [
-              (G_REAL, "Real drone plots = FOR-instanceV2 ULS/DLS plots, the closest to our DJI L2 data."),
+              (G_REAL, "Real drone plots = real UAV laser scans with hand-labelled trees, the closest to our DJI L2 data."),
               (G_SYN, "Synthetic eucalypt = Synthetic Forest scenes (simulated scans, cleaner than real ones)."),
               (G_GROUND, "Ground-based scans = BlueCat and NIBIO_MLS, very different from drone data.")] if g in groups) + "\n",
           "\nDetails per group:\n\n",
@@ -261,6 +264,10 @@ def main():
            "ForestFormer3D 0.82 to 0.84, SegmentAnyTreeV2 0.85. Thinning makes every model worse, so compare models within this report.\n",
            "- Synthetic Forest scenes are simulated (HELIOS++), cleaner than real scans; use them to rank models, not to predict accuracy on our data.\n",
            "- No model here saw these plots during tuning, except that the classical models' parameters were chosen on RMIT train.\n"]
+    if any(p["region"] in CEDAR for p in plots):
+        md += ["- CedarCypress3D: circular plots of about 12 m radius inside 36 x 36 m tiles. Only trees whose stem is inside the circle "
+               "are labelled; the trees around them are in the data (models see them) but are not scored. Kokonoe was scanned with a "
+               "DJI Zenmuse L2, like our data; Saiki with a RIEGL VUX-1LR. Even-aged conifer plantations, so easier than native forest.\n"]
     gallery = ""
     if a.labelled_dir and not a.no_pictures:
         gallery = pictures(a, folder, plots, models)
