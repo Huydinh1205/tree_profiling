@@ -139,6 +139,11 @@ different plots whose tree IDs would collide.
 
 ## 6. Benchmark on many labelled plots (FOR-instanceV2, Synthetic Forest)
 
+Easiest: double-click `processes\run_benchmark_v2.bat`. It downloads the FOR-instanceV2 test plots if needed (0.4 GB),
+unzips, converts them, runs the models and opens `summary.md`. Press Enter for all 3 models or type `F` for the fast run.
+
+Manual steps:
+
 ```powershell
 cd tree_profiling\processes
 .\download_datasets.bat                                  # once, about 13 GB into ..\data\
