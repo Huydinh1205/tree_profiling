@@ -6,6 +6,9 @@ and one run. Then split its result back into one file per plot for scoring.
           -> mosaic_100/mosaic_unlabelled.laz   (upload this; x y z only)
              mosaic_100/mosaic_labelled.las     (same points + treeID, for reference)
              mosaic_100/index.csv               (where each plot sits in the mosaic)
+  find:   python mosaic_labelled.py find mosaic_100/index.csv --search %USERPROFILE%/Downloads --out mosaic_100/sat_result.laz
+          -> looks for the model's result (e.g. Galaxy's "...[Processed Files].zip", which is really a LAZ) and copies
+             the newest file whose point count matches the mosaic; exit code 1 if none is found
   split:  python mosaic_labelled.py split mosaic_100/index.csv segmented_pc.laz --out mosaic_100/sat_by_plot
           -> one <plot>.laz per plot, in the plot's own coordinates, with the model's tree IDs,
              ready for:  process1_benchmark.py plots_100/<plot>.las --external sat=mosaic_100/sat_by_plot/<plot>.laz
@@ -82,13 +85,43 @@ def split(a):
         print(f"{r['plot']}: {m.sum():,} points, {len(np.unique(ids[m][ids[m] > 0]))} trees")
 
 
+
+def find(a):
+    """Find the result of the mosaic among downloaded files: same number of points + a tree ID field."""
+    import os, shutil
+    total = sum(int(r["points"]) for r in csv.DictReader(open(a.index)))
+    cands = []
+    for d in a.search:
+        d = Path(os.path.expandvars(os.path.expanduser(d)))
+        if not d.is_dir(): continue
+        for f in d.iterdir():
+            if f.is_file() and (f.suffix.lower() in (".laz", ".las", ".zip") or "Processed Files" in f.name):
+                cands.append(f)
+    found = []
+    for f in cands:
+        try:
+            with laspy.open(f) as r:
+                n = r.header.point_count
+                dims = list(r.header.point_format.extra_dimension_names)
+        except Exception:
+            continue
+        if n == total and any("instance" in x.lower() or "treeid" in x.lower() for x in dims) and "mosaic_labelled" not in f.name:
+            found.append(f)
+    if not found:
+        print(f"No result with {total:,} points found in: {', '.join(a.search)}"); raise SystemExit(1)
+    best = max(found, key=lambda f: f.stat().st_mtime)
+    if Path(a.out).resolve() != best.resolve():
+        shutil.copy(best, a.out)
+    print(f"Found {best} ({total:,} points) -> {a.out}")
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     b = sub.add_parser("build"); b.add_argument("files", nargs="+"); b.add_argument("--out", required=True); b.add_argument("--gap", type=float, default=30)
     s = sub.add_parser("split"); s.add_argument("index"); s.add_argument("result"); s.add_argument("--out", required=True); s.add_argument("--field")
+    f = sub.add_parser("find"); f.add_argument("index"); f.add_argument("--search", nargs="+", required=True); f.add_argument("--out", required=True)
     a = ap.parse_args()
-    build(a) if a.cmd == "build" else split(a)
+    {"build": build, "split": split, "find": find}[a.cmd](a)
 
 
 if __name__ == "__main__":

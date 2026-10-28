@@ -11,3 +11,4 @@ pyproj>=3.5
 matplotlib>=3.7
 plyfile>=1.0
 numba>=0.59
+pillow>=9

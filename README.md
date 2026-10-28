@@ -139,10 +139,18 @@ different plots whose tree IDs would collide.
 
 ## 6. Benchmark on many labelled plots (FOR-instanceV2, Synthetic Forest)
 
-Easiest: double-click `processes\run_benchmark_v2.bat`. It downloads the FOR-instanceV2 test plots if needed (0.4 GB),
-unzips, converts them, runs the models and opens `report.html` (the evaluation: F1 overall, by region, error types, per plot).
-Press Enter for all 3 models, `F` for the fast run, or `S` to add SegmentAnyTree: the first time it builds one file with all plots
-(`mosaic_100\mosaic_unlabelled.laz`) to run on usegalaxy.eu; save Galaxy's result as `mosaic_100\sat_result.laz` and choose `S` again.
+Easiest: double-click `processes\run_benchmark_v2.bat`, twice.
+
+1. **Run 1** downloads the FOR-instanceV2 test plots if needed (0.4 GB), converts them to 100 pts/m2, makes one file with all
+   plots for SegmentAnyTree (`data\FOR-instanceV2\mosaic_100\mosaic_unlabelled.laz`), opens that folder and usegalaxy.eu,
+   then runs the 3 classical models on this computer (about 40 minutes; type `F` for a fast run with 2 models).
+2. **Meanwhile on usegalaxy.eu**: upload `mosaic_unlabelled.laz`, run "3DTrees: SegmentAnyTree", download the result and put it
+   in the same `mosaic_100` folder, keeping Galaxy's file name (e.g. `Galaxy5-[Processed Files].zip`, it is really a LAZ).
+3. If the Galaxy file is already there when the models finish, it is added straight away. Otherwise **run 2** of the .bat
+   skips the models that are done and only adds SegmentAnyTree (a few minutes).
+
+The result is `processes\results\v2_100\report.html`: F1 overall and by region, error types, one image per model for one plot
+per region, and right/wrong close-ups for every model.
 
 Manual steps:
 
