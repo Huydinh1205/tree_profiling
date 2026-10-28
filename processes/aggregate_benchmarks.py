@@ -1,17 +1,34 @@
-"""Pool process 1 results from many plots into one table: per model, per region and overall.
+"""Pool process 1 (and process 3) results from many plots into one evaluation report:
+per model, per region and overall, as summary.md, summary.csv and a standalone report.html.
 
 Pooled precision / recall / F1 are computed from the summed counts (matched, predicted,
 reference trees) of the shift-0 run of each plot, benchmark protocol, so big plots weigh more,
 like the published FOR-instance numbers. The mean of per-plot F1 is given too.
+If a plot folder has errors/summary.csv (process 3), error types are pooled as well.
 
-Usage: python aggregate_benchmarks.py results/v2_100/* --out results/v2_100_summary.md
+Usage: python aggregate_benchmarks.py results/v2_100/* --out results/v2_100/summary.md
 Region = text before the first "_" of the plot folder name (RMIT, NIBIO2, SCION, ...).
 """
 import argparse, csv
 from collections import defaultdict
 from pathlib import Path
+import numpy as np
 import treeseg as T
 
+REGION_INFO = {
+    "RMIT": "Australia, dry eucalypt forest (Riegl miniVUX ULS)",
+    "CULS": "Czechia, conifer plantation (ULS)",
+    "NIBIO": "Norway, boreal conifer (ULS)",
+    "NIBIO2": "Norway, boreal mixed (ULS)",
+    "NIBIO_MLS": "Norway, boreal conifer (mobile laser scanning, ground-based)",
+    "SCION": "New Zealand, radiata pine plantation (ULS)",
+    "TUWIEN": "Austria, mixed broadleaf (ULS)",
+    "Yuchen": "China, broadleaf (DLS)",
+    "BlueCat": "Czechia, merged TLS single trees (no terrain; ground added)",
+}
+ERR = ["ok", "merged", "split", "missed", "boundary"]
+NON_DRONE = {"BlueCat", "NIBIO_MLS"}          # ground-based scans: shown, but left out of the "drone" total
+DRONE = "ALL drone"
 
 
 def expand(paths):
@@ -23,45 +40,142 @@ def expand(paths):
         out += hits if hits else [p]
     return out
 
+
+def region_of(name):
+    return "NIBIO_MLS" if name.startswith("NIBIO_MLS") else name.split("_")[0]
+
+
+def fig_regions(rows, models, path):
+    import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
+    regs = [r for r in dict.fromkeys(r["region"] for r in rows) if r not in ("ALL", DRONE)] + [g for g in (DRONE, "ALL") if any(r["region"] == g for r in rows)]
+    w = 0.8 / max(len(models), 1); fig, ax = plt.subplots(figsize=(max(8, 1.2 * len(regs) * max(1, len(models) / 2)), 4.5))
+    for k, m in enumerate(models):
+        v = [next((r["f1"] for r in rows if r["region"] == g and r["model"] == m), np.nan) for g in regs]
+        ax.bar(np.arange(len(regs)) + (k - (len(models) - 1) / 2) * w, v, w, label=m)
+    ax.set_xticks(range(len(regs))); ax.set_xticklabels([f"{g}\n({next(r['gt'] for r in rows if r['region'] == g)} trees)" for g in regs], fontsize=8)
+    ax.set_ylabel("pooled F1 (IoU >= 0.5)"); ax.set_ylim(0, 1); ax.grid(axis="y", alpha=0.3); ax.legend(fontsize=8)
+    ax.axvline(len(regs) - 0.5 - sum(g in regs for g in (DRONE, "ALL")), color="grey", lw=0.8)
+    fig.tight_layout(); fig.savefig(path, dpi=110); plt.close(fig)
+
+
+def fig_errors(err, path):
+    import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
+    col = {"ok": "#2ca02c", "merged": "#d62728", "split": "#ff7f0e", "missed": "#7f7f7f", "boundary": "#9467bd"}
+    models = list(err); fig, ax = plt.subplots(figsize=(9, 0.6 * len(models) + 1.6))
+    left = np.zeros(len(models))
+    for e in ERR:
+        tot = np.array([sum(err[m].values()) for m in models], float)
+        v = np.array([err[m][e] for m in models]) / np.maximum(tot, 1)
+        ax.barh(range(len(models)), v, left=left, color=col[e], label=e)
+        for i, (l, x) in enumerate(zip(left, v)):
+            if x > 0.06: ax.text(l + x / 2, i, f"{x:.0%}", ha="center", va="center", fontsize=8, color="white")
+        left += v
+    ax.set_yticks(range(len(models))); ax.set_yticklabels(models, fontsize=9); ax.invert_yaxis()
+    ax.set_xlim(0, 1); ax.set_xlabel("share of reference trees"); ax.legend(ncol=5, fontsize=8, loc="upper center", bbox_to_anchor=(0.5, -0.25))
+    fig.tight_layout(); fig.savefig(path, dpi=110); plt.close(fig)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("folders", nargs="+", help="process 1 output folders, one per plot")
-    ap.add_argument("--out", default="benchmark_summary.md")
+    ap.add_argument("--out", default="summary.md")
+    ap.add_argument("--title", default="Tree segmentation evaluation")
     a = ap.parse_args()
-    acc = defaultdict(lambda: dict(gt=0, pred=0, matched=0, f1s=[], plots=0, secs=0.0))
+    out_md = Path(a.out); folder = out_md.parent; folder.mkdir(parents=True, exist_ok=True)
+    acc = defaultdict(lambda: dict(gt=0, pred=0, matched=0, f1s=[], plots=0, secs=0.0, det=[]))
+    err = defaultdict(lambda: defaultdict(int)); err_over = defaultdict(lambda: [0, 0])
     plots = []
     for d in expand(a.folders):
         d = Path(d); f = d / "scores_all_runs.csv"
         if not f.exists(): continue
-        region = d.name.split("_")[0]
+        region = region_of(d.name)
         for r in csv.DictReader(open(f)):
             if r["protocol"] != "benchmark" or r["shift"] != "0,0": continue
-            for key in [(r["model"], region), (r["model"], "ALL")]:
+            m = T.model_label(r["model"])
+            for key in [(m, region), (m, "ALL")] + ([(m, DRONE)] if region not in NON_DRONE else []):
                 s = acc[key]; s["gt"] += int(r["gt_trees"]); s["pred"] += int(r["pred_trees"]); s["matched"] += int(r["matched"])
-                s["f1s"].append(float(r["f1"])); s["plots"] += 1; s["secs"] += float(r["seconds"])
-            plots.append(dict(plot=d.name, region=region, model=r["model"], gt=int(r["gt_trees"]), pred=int(r["pred_trees"]),
+                s["f1s"].append(float(r["f1"])); s["plots"] += 1; s["secs"] += float(r["seconds"]); s["det"].append(float(r["det_f1"]))
+            plots.append(dict(plot=d.name, region=region, model=m, gt=int(r["gt_trees"]), pred=int(r["pred_trees"]),
                               matched=int(r["matched"]), f1=float(r["f1"]), det_f1=float(r["det_f1"]), seconds=float(r["seconds"])))
+        e = d / "errors" / "summary.csv"
+        if e.exists():
+            for r in csv.DictReader(open(e)):
+                m = T.model_label(r["model"]) if r["model"] in T.MODELS else r["model"]
+                for k in ERR: err[m][k] += int(r[f"ref_{k}"])
+            for ef in (d / "errors").glob("errors_*.csv"):
+                m = T.model_label(ef.stem[len("errors_"):])
+                for r in csv.DictReader(open(ef)):
+                    if int(r["overtopped"]):
+                        err_over[m][0] += r["status"] == "ok"; err_over[m][1] += 1
+    if not plots: raise SystemExit("No results found")
+    models = list(dict.fromkeys(p["model"] for p in plots))
     rows = []
-    for (m, reg), s in sorted(acc.items(), key=lambda kv: (kv[0][1] != "ALL", kv[0][1], kv[0][0])):
-        P = s["matched"] / s["pred"] if s["pred"] else 0; R = s["matched"] / s["gt"] if s["gt"] else 0
-        rows.append(dict(region=reg, model=T.MODELS[m]["label"] if m in T.MODELS else m, plots=s["plots"], gt=s["gt"], pred=s["pred"],
-                         matched=s["matched"], precision=P, recall=R, f1=2 * P * R / (P + R) if P + R else 0,
-                         f1_mean=sum(s["f1s"]) / len(s["f1s"]), seconds=s["secs"]))
-    md = ["# Pooled benchmark\n", f"{len({p['plot'] for p in plots})} plots, protocol benchmark, IoU >= 0.5, shift 0 runs.\n",
-          T.md_table(rows, [("Region", "region"), ("Model", "model"), ("Plots", "plots"), ("Ref. trees", "gt"), ("Pred. trees", "pred"),
-                            ("Matched", "matched"), ("Precision", "precision"), ("Recall", "recall"), ("Pooled F1", "f1"),
-                            ("Mean plot F1", "f1_mean"), ("Time (s)", "seconds")],
-                     {"precision": "{:.2f}", "recall": "{:.2f}", "f1": "{:.2f}", "f1_mean": "{:.2f}", "seconds": "{:.0f}"}),
-          "\n## Per plot\n",
-          T.md_table(sorted(plots, key=lambda p: (p["plot"], p["model"])),
-                     [("Plot", "plot"), ("Model", "model"), ("Ref.", "gt"), ("Pred.", "pred"), ("Matched", "matched"), ("F1", "f1"),
-                      ("Top-detection F1", "det_f1"), ("s", "seconds")], {"f1": "{:.2f}", "det_f1": "{:.2f}", "seconds": "{:.0f}"})]
-    Path(a.out).write_text("\n".join(md), encoding="utf-8")
-    with open(Path(a.out).with_suffix(".csv"), "w", newline="") as f:
+    regions = [DRONE, "ALL"] + sorted({p["region"] for p in plots})
+    for reg in regions:
+        for m in models:
+            s = acc.get((m, reg))
+            if not s: continue
+            P = s["matched"] / s["pred"] if s["pred"] else 0; R = s["matched"] / s["gt"] if s["gt"] else 0
+            rows.append(dict(region=reg, model=m, plots=s["plots"], gt=s["gt"], pred=s["pred"], matched=s["matched"],
+                             precision=P, recall=R, f1=2 * P * R / (P + R) if P + R else 0,
+                             f1_mean=float(np.mean(s["f1s"])), det_f1=float(np.mean(s["det"])), seconds=s["secs"]))
+    fig_regions(rows, models, folder / "fig_f1_by_region.png")
+    if err: fig_errors(err, folder / "fig_error_types.png")
+
+    n_plots = len({p["plot"] for p in plots}); n_trees = next(r["gt"] for r in rows if r["region"] == "ALL")
+    head = DRONE if any(r["region"] == DRONE for r in rows) and any(p["region"] in NON_DRONE for p in plots) else "ALL"
+    allrows = sorted([r for r in rows if r["region"] == head], key=lambda r: -r["f1"])
+    everything = sorted([r for r in rows if r["region"] == "ALL"], key=lambda r: -r["f1"])
+    best = allrows[0]
+    fmt = {"precision": "{:.2f}", "recall": "{:.2f}", "f1": "{:.2f}", "f1_mean": "{:.2f}", "det_f1": "{:.2f}", "seconds": "{:.0f}"}
+    md = [f"# {a.title}\n",
+          f"{n_plots} labelled plots, {n_trees} reference trees. A predicted tree counts as correct when it shares at least "
+          "half of its points with one reference tree (IoU >= 0.5, one-to-one), the FOR-instance / SegmentAnyTree rule. "
+          "Scores are pooled over all trees (bigger plots weigh more).\n",
+          f"Best overall: **{best['model']}**, F1 {best['f1']:.2f} (precision {best['precision']:.2f}, recall {best['recall']:.2f})"
+          + (f" on the {allrows[0]['gt']} trees of drone (ULS/DLS) plots.\n" if head == DRONE else ".\n"),
+          "## Overall" + (" (drone plots only)" if head == DRONE else "") + "\n",
+          T.md_table(allrows, [("Model", "model"), ("Plots", "plots"), ("Reference trees", "gt"), ("Predicted trees", "pred"),
+                               ("Correct", "matched"), ("Precision", "precision"), ("Recall", "recall"), ("F1", "f1"),
+                               ("Mean plot F1", "f1_mean"), ("Tree-top detection F1", "det_f1"), ("Run time (s)", "seconds")], fmt),
+          "\nPrecision = share of predicted trees that are correct. Recall = share of reference trees found. "
+          "F1 combines both (1 = perfect).\n"] + ([
+          "\nAll plots including ground-based scans (" + ", ".join(sorted(NON_DRONE)) + "), which look very different from our drone data:\n\n",
+          T.md_table(everything, [("Model", "model"), ("Reference trees", "gt"), ("Predicted trees", "pred"), ("Precision", "precision"),
+                                  ("Recall", "recall"), ("F1", "f1")], fmt)] if head == DRONE else []) + [
+          "\n## By region\n", "![F1 by region](fig_f1_by_region.png)\n",
+          T.md_table([dict(r, info=REGION_INFO.get(r["region"], "")) for r in rows if r["region"] not in ("ALL", DRONE)],
+                     [("Region", "region"), ("Forest", "info"), ("Model", "model"), ("Plots", "plots"), ("Trees", "gt"),
+                      ("Predicted", "pred"), ("Precision", "precision"), ("Recall", "recall"), ("F1", "f1")], fmt)]
+    if err:
+        er = [dict(model=m, **{k: err[m][k] for k in ERR}, total=sum(err[m].values()),
+                   over=f"{err_over[m][0]}/{err_over[m][1]}" if err_over[m][1] else "n/a") for m in err]
+        md += ["\n## What goes wrong (process 3)\n",
+               "Every reference tree is put in one class: `ok` found correctly; `merged` came out together with neighbours as one tree; "
+               "`split` came out as several trees; `missed` its points were left unassigned; `boundary` right tree, wrong outline.\n",
+               "![error types](fig_error_types.png)\n",
+               T.md_table(er, [("Model", "model"), ("ok", "ok"), ("merged", "merged"), ("split", "split"), ("missed", "missed"),
+                               ("boundary", "boundary"), ("Reference trees", "total"), ("Found correctly when under another crown", "over")]),
+               "\nPer plot: `[plot]/errors/report.md`, maps `fig_errors_[model].png`, coordinates of each tree `errors_[model].csv`.\n"]
+    md += ["\n## Per plot\n",
+           T.md_table(sorted(plots, key=lambda p: (p["plot"], p["model"])),
+                      [("Plot", "plot"), ("Model", "model"), ("Reference", "gt"), ("Predicted", "pred"), ("Correct", "matched"),
+                       ("F1", "f1"), ("Tree-top detection F1", "det_f1"), ("s", "seconds")], {"f1": "{:.2f}", "det_f1": "{:.2f}", "seconds": "{:.0f}"}),
+           "\n## Notes\n",
+           "- Point clouds were thinned to the density in the folder name (e.g. plots_100 = 100 pts/m2) to look like our DJI L2 data.\n",
+           "- Published on the full-resolution FOR-instanceV2 test set (same rule): SegmentAnyTree v1 about 0.75 (RMIT), "
+           "ForestFormer3D 0.82 to 0.84, SegmentAnyTreeV2 0.85. Thinning makes every model worse, so compare models within this report.\n",
+           "- No model here saw these plots during tuning, except that the classical models' parameters were chosen on RMIT train.\n"]
+    text = "\n".join(p.rstrip("\n") + "\n" for p in md)
+    out_md.write_text(text, encoding="utf-8")
+    with open(out_md.with_suffix(".csv"), "w", newline="") as f:
         w = csv.DictWriter(f, list(rows[0].keys())); w.writeheader(); w.writerows(rows)
-    for r in rows:
-        if r["region"] == "ALL": print(f"{r['model']:28s} pooled F1 {r['f1']:.2f} (P {r['precision']:.2f} R {r['recall']:.2f}) on {r['gt']} trees")
-    print("->", a.out)
+    from process2_segment import html_from_md
+    html = html_from_md(text, folder).replace("<title>Tree profiling report</title>", f"<title>{a.title}</title>")
+    (folder / "report.html").write_text(html, encoding="utf-8")
+    for r in allrows:
+        print(f"{r['model']:32s} pooled F1 {r['f1']:.2f} (P {r['precision']:.2f} R {r['recall']:.2f}) on {r['gt']} trees")
+    print("->", folder / "report.html")
 
 
 if __name__ == "__main__":

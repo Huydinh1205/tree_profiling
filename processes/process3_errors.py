@@ -147,7 +147,7 @@ def main():
     summary, md = [], [f"# Segmentation errors: {Path(a.labelled).name}\n",
                        f"{n_gt} reference trees. Generated {time.strftime('%Y-%m-%d %H:%M')}.\n"]
     for f in preds:
-        m = f.stem; label = T.MODELS[m]["label"] if m in T.MODELS else m
+        m = f.stem; label = T.model_label(m)
         pred = drop_outside(np.load(f).astype(np.int64), keep)
         rows, prows = classify(gt, pred, keep, x, y, h)
         for name, rs in [(f"errors_{m}.csv", rows), (f"predicted_{m}.csv", prows)]:

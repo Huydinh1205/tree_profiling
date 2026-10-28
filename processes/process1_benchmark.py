@@ -64,7 +64,10 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("labelled", help="labelled .las (FOR-instance v1) or .ply (FOR-instanceV2)")
     ap.add_argument("--out", default="results/benchmark")
-    ap.add_argument("--models", nargs="+", default=list(T.MODELS), choices=list(T.MODELS))
+    ap.add_argument("--models", nargs="*", default=list(T.MODELS), choices=list(T.MODELS),
+                    help="models to run; give none (just --models) to only score --external results")
+    ap.add_argument("--append", action="store_true",
+                    help="keep the results already in --out and add/replace only the models of this run")
     ap.add_argument("--external", nargs="*", default=[], metavar="NAME=FILE[:FIELD]",
                     help="score a result made elsewhere, e.g. sat=segmented_pc.laz")
     ap.add_argument("--shifts", type=int, default=5, help="raster alignments for CHM models (1-5, default 5)")
@@ -119,6 +122,12 @@ def main():
         except Exception as e:
             print(f"  external {name} FAILED: {e}"); status[f"external:{name}"] = f"failed: {e}"
 
+    if a.append and (out / "scores_all_runs.csv").exists():
+        redone = {r["model"] for r in runs}
+        old = [r for r in csv.DictReader(open(out / "scores_all_runs.csv")) if r["model"] not in redone]
+        for r in old:
+            status.setdefault(r["model"], "ran (earlier run)")
+        runs = old + runs
     if not runs: sys.exit("No model ran. See messages above.")
     keys = list(runs[0].keys())
     with open(out / "scores_all_runs.csv", "w", newline="") as f:
@@ -142,7 +151,7 @@ def main():
     preds = {m: np.load(out / "predictions" / f"{m.replace(':', '_')}.npy").astype(np.int64)
              for m in status if status[m].startswith("ran") and (out / "predictions" / f"{m.replace(':', '_')}.npy").exists()}
     keepv = protocols["benchmark"]
-    lab = lambda m: T.MODELS[m]["label"] if m in T.MODELS else m
+    lab = T.model_label
     T.fig_topviews([("Height above ground", x[keepv], y[keepv], hag_eval[keepv], None),
                     (f"Reference ({n_gt} labelled trees)", x[keepv], y[keepv], hag_eval[keepv], T.relabel(gt[keepv]))] +
                    [(lab(m), x[keepv], y[keepv], hag_eval[keepv], T.relabel(drop_outside(ids, keepv)[keepv])) for m, ids in preds.items()],
@@ -156,7 +165,7 @@ def main():
     first = runs[0]
     rep = [f"# Tree segmentation benchmark\n",
            f"Dataset: `{a.labelled}`, {len(x):,} points, {n_gt} labelled trees. "
-           f"{first.get('overtopped_share', 0):.0%} of labelled trees are under another tree's crown.\n",
+           f"{float(first.get('overtopped_share', 0) or 0):.0%} of labelled trees are under another tree's crown.\n",
            f"Run on {time.strftime('%Y-%m-%d %H:%M')}, {time.time() - t_start:.0f} s.\n",
            "## Models used\n",
            T.md_table([dict(name=lab(m), kind=T.MODELS[m]["kind"] if m in T.MODELS else "external result",

@@ -398,6 +398,14 @@ def run_model(name, cloud: Cloud, allow_slow=False):
     return relabel(ids), time.time() - t0
 
 
+def model_label(m):
+    """Display name: built-in models by their label, external results by their name (sat = SegmentAnyTree)."""
+    if m in MODELS: return MODELS[m]["label"]
+    n = m.split(":", 1)[-1]
+    n = n[len("external_"):] if n.startswith("external_") else n
+    return "SegmentAnyTree v1 (external)" if n.lower() in ("sat", "segmentanytree") else n
+
+
 def relabel(ids):
     """Consecutive IDs 1..N, 0 stays 0."""
     u, inv = np.unique(np.asarray(ids).astype(np.int64), return_inverse=True)

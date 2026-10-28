@@ -49,27 +49,59 @@ if errorlevel 1 goto failed
 :prepared
 
 REM ---- 4. Which models? ----
+set "MOS=%V2%\mosaic_100"
 echo.
-echo Press Enter to run all 3 models (about 40 minutes, li2012 is slow).
-echo Type F then Enter for the fast run (CHM watershed + Dalponte only, a few minutes).
+echo   Enter  = run the 3 classical models (about 40 minutes, li2012 is slow)
+echo   F      = fast run: CHM watershed + Dalponte only (a few minutes)
+echo   S      = add SegmentAnyTree results from usegalaxy.eu to the comparison
 set "MODE="
 set /p "MODE=Choice: "
 set "MODELS=chm_watershed dalponte_py li2012_py"
 set "OUT=results\v2_100"
+set "EXTRA="
 if /i "%MODE%"=="F" (
   set "MODELS=chm_watershed dalponte_py"
   set "OUT=results\v2_100_fast"
 )
+if /i "%MODE%"=="S" goto sat
+goto run
+
+REM ---- SegmentAnyTree: one upload to usegalaxy.eu for all plots ----
+:sat
+if not exist "%MOS%\index.csv" (
+  echo Putting all plots in one file for upload...
+  %PY% mosaic_labelled.py build "%V2%\plots_100\*.las" --out "%MOS%"
+  if errorlevel 1 goto failed
+)
+if exist "%MOS%\sat_result.laz" goto satsplit
+echo.
+echo SegmentAnyTree needs an NVIDIA GPU, so run it on usegalaxy.eu (free account):
+echo   1. Upload this file:  %CD%\%MOS%\mosaic_unlabelled.laz
+echo   2. Search the tools for "3DTrees: SegmentAnyTree" and run it on that file.
+echo   3. Download the result. Galaxy names it "...[Processed Files].zip" but it is a LAZ file:
+echo      rename it to  sat_result.laz  and put it in the folder that opens now.
+echo   4. Run this .bat again and choose S.
+start "" "%MOS%"
+start "" "https://usegalaxy.eu"
+pause
+exit /b 0
+:satsplit
+echo Cutting the SegmentAnyTree result back into plots...
+%PY% mosaic_labelled.py split "%MOS%\index.csv" "%MOS%\sat_result.laz" --out "%MOS%\sat_by_plot"
+if errorlevel 1 goto failed
+set "EXTRA=--external sat=%MOS%\sat_by_plot"
+echo The 3 classical models are run too if they are not done yet.
 
 REM ---- 5. Run (plots already done are skipped, so you can stop and run again) ----
+:run
 echo.
 echo Running... results go to %CD%\%OUT%
-%PY% benchmark_folder.py "%V2%\plots_100" --out "%OUT%" --models %MODELS%
+%PY% benchmark_folder.py "%V2%\plots_100" --out "%OUT%" --models %MODELS% %EXTRA% --title "Tree segmentation evaluation: FOR-instanceV2 test plots at 100 pts/m2"
 if errorlevel 1 goto failed
-start "" notepad "%OUT%\summary.md"
+start "" "%OUT%\report.html"
 start "" "%OUT%"
 echo.
-echo Done. The summary has opened in Notepad.
+echo Done. The evaluation report has opened in your browser.
 pause
 exit /b 0
 

@@ -140,7 +140,9 @@ different plots whose tree IDs would collide.
 ## 6. Benchmark on many labelled plots (FOR-instanceV2, Synthetic Forest)
 
 Easiest: double-click `processes\run_benchmark_v2.bat`. It downloads the FOR-instanceV2 test plots if needed (0.4 GB),
-unzips, converts them, runs the models and opens `summary.md`. Press Enter for all 3 models or type `F` for the fast run.
+unzips, converts them, runs the models and opens `report.html` (the evaluation: F1 overall, by region, error types, per plot).
+Press Enter for all 3 models, `F` for the fast run, or `S` to add SegmentAnyTree: the first time it builds one file with all plots
+(`mosaic_100\mosaic_unlabelled.laz`) to run on usegalaxy.eu; save Galaxy's result as `mosaic_100\sat_result.laz` and choose `S` again.
 
 Manual steps:
 
