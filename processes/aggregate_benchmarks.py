@@ -30,8 +30,14 @@ REGION_INFO = {
     "ClosedForest": "Synthetic eucalypt closed forest, 84% canopy cover (HELIOS++ ULS)",
 }
 ERR = ["ok", "merged", "split", "missed", "boundary"]
-NON_DRONE = {"BlueCat", "NIBIO_MLS"}          # ground-based scans: shown, but left out of the "drone" total
-DRONE = "ALL drone"
+NON_DRONE = {"BlueCat", "NIBIO_MLS"}          # ground-based scans: shown, but left out of the "drone" totals
+SYNTHETIC = {"WoodLand", "OpenForest", "ClosedForest"}
+G_REAL, G_SYN, G_GROUND, G_ALL = "Real drone plots", "Synthetic eucalypt", "Ground-based scans", "ALL"
+GROUPS = [G_REAL, G_SYN, G_GROUND, G_ALL]
+
+
+def group_of(region):
+    return G_SYN if region in SYNTHETIC else G_GROUND if region in NON_DRONE else G_REAL
 
 
 def expand(paths):
@@ -50,14 +56,14 @@ def region_of(name):
 
 def fig_regions(rows, models, path):
     import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
-    regs = [r for r in dict.fromkeys(r["region"] for r in rows) if r not in ("ALL", DRONE)] + [g for g in (DRONE, "ALL") if any(r["region"] == g for r in rows)]
+    regs = [r for r in dict.fromkeys(r["region"] for r in rows) if r not in GROUPS] + [g for g in GROUPS if any(r["region"] == g for r in rows)]
     w = 0.8 / max(len(models), 1); fig, ax = plt.subplots(figsize=(max(8, 1.2 * len(regs) * max(1, len(models) / 2)), 4.5))
     for k, m in enumerate(models):
         v = [next((r["f1"] for r in rows if r["region"] == g and r["model"] == m), np.nan) for g in regs]
         ax.bar(np.arange(len(regs)) + (k - (len(models) - 1) / 2) * w, v, w, label=m)
     ax.set_xticks(range(len(regs))); ax.set_xticklabels([f"{g}\n({next(r['gt'] for r in rows if r['region'] == g)} trees)" for g in regs], fontsize=8)
     ax.set_ylabel("pooled F1 (IoU >= 0.5)"); ax.set_ylim(0, 1); ax.grid(axis="y", alpha=0.3); ax.legend(fontsize=8)
-    ax.axvline(len(regs) - 0.5 - sum(g in regs for g in (DRONE, "ALL")), color="grey", lw=0.8)
+    ax.axvline(len(regs) - 0.5 - sum(g in regs for g in GROUPS), color="grey", lw=0.8)
     fig.tight_layout(); fig.savefig(path, dpi=110); plt.close(fig)
 
 
@@ -100,7 +106,8 @@ def pictures(a, folder, plots, models):
     """HTML for the two picture sections: plot views and right/wrong examples."""
     import html as H
     import examples as X
-    lab_dir = Path(a.labelled_dir)
+    lab_dirs = [Path(d) for d in a.labelled_dir]
+    find_las = lambda name: next((q for d in lab_dirs for q in [d / f"{name}.las", d / f"{name}.laz"] if q.exists()), None)
     by_plot = defaultdict(dict)
     for p in plots: by_plot[p["plot"]][p["model"]] = p
     # one plot per drone region: the one with most reference trees
@@ -110,13 +117,13 @@ def pictures(a, folder, plots, models):
         if reg in NON_DRONE: continue
         n = next(iter(ms.values()))["gt"]
         if reg not in best or n > best[reg][1]: best[reg] = (name, n)
-    order = sorted(best, key=lambda r: (r != "RMIT", r))[:a.view_plots]
+    order = sorted(best, key=lambda r: (r in SYNTHETIC, r != "RMIT", r))[:a.view_plots]
     out = ["<h2>Pictures</h2>",
            "<p>Top views of one plot per region: each image is one result, every tree in its own colour, grey = not assigned to any tree. "
            "Click a plot to open it.</p>"]
     for k, reg in enumerate(order):
         name = best[reg][0]; pdir = folder / name
-        las = next((q for q in [lab_dir / f"{name}.las", lab_dir / f"{name}.laz"] if q.exists()), None)
+        las = find_las(name)
         if las is None or not (pdir / "predictions").exists(): continue
         keymap = {}
         for f in (pdir / "predictions").glob("*.npy"):
@@ -132,9 +139,9 @@ def pictures(a, folder, plots, models):
             out.append('<div class="gal big">' + "".join(_img(f, T.model_label(f.stem[len("fig_errors_"):])) for f in ef) + "</div>")
         out.append("</details>")
     print("  pictures: examples")
-    ex = X.examples([folder / p for p in by_plot], lab_dir, folder / "examples")
+    ex = X.examples([folder / p for p in by_plot], lab_dirs, folder / "examples")
     out += ["<h2>Examples: right and wrong</h2>",
-            "<p>Randomly chosen reference trees from the drone plots (taller than 4 m, at least 150 points), for each model: "
+            "<p>Randomly chosen reference trees from the drone and synthetic plots (taller than 4 m, at least 150 points), for each model: "
             "2 found correctly, then the error types. Top row seen from above, bottom row from the side. "
             "<b>Red</b> on the left is the reference tree; <b>red</b> on the right is the predicted tree that took most of its points "
             "(for a merged tree it also covers the neighbours). Grey = not assigned to any tree.</p>"]
@@ -149,8 +156,8 @@ def main():
     ap.add_argument("folders", nargs="+", help="process 1 output folders, one per plot")
     ap.add_argument("--out", default="summary.md")
     ap.add_argument("--title", default="Tree segmentation evaluation")
-    ap.add_argument("--labelled-dir", help="folder with the labelled plots (.las); enables the pictures")
-    ap.add_argument("--view-plots", type=int, default=7, help="number of plots shown with one image per model (one per region)")
+    ap.add_argument("--labelled-dir", nargs="+", help="folder(s) with the labelled plots (.las); enables the pictures")
+    ap.add_argument("--view-plots", type=int, default=10, help="number of plots shown with one image per model (one per region)")
     ap.add_argument("--no-pictures", action="store_true")
     a = ap.parse_args()
     out_md = Path(a.out); folder = out_md.parent; folder.mkdir(parents=True, exist_ok=True)
@@ -164,10 +171,10 @@ def main():
         for r in csv.DictReader(open(f)):
             if r["protocol"] != "benchmark" or r["shift"] != "0,0": continue
             m = T.model_label(r["model"])
-            for key in [(m, region), (m, "ALL")] + ([(m, DRONE)] if region not in NON_DRONE else []):
+            for key in [(m, region), (m, G_ALL), (m, group_of(region))]:
                 s = acc[key]; s["gt"] += int(r["gt_trees"]); s["pred"] += int(r["pred_trees"]); s["matched"] += int(r["matched"])
                 s["f1s"].append(float(r["f1"])); s["plots"] += 1; s["secs"] += float(r["seconds"]); s["det"].append(float(r["det_f1"]))
-            plots.append(dict(plot=d.name, region=region, model=m, gt=int(r["gt_trees"]), pred=int(r["pred_trees"]),
+            plots.append(dict(plot=d.name, region=region, group=group_of(region), model=m, gt=int(r["gt_trees"]), pred=int(r["pred_trees"]),
                               matched=int(r["matched"]), f1=float(r["f1"]), det_f1=float(r["det_f1"]), seconds=float(r["seconds"])))
         e = d / "errors" / "summary.csv"
         if e.exists():
@@ -182,7 +189,9 @@ def main():
     if not plots: raise SystemExit("No results found")
     models = list(dict.fromkeys(p["model"] for p in plots))
     rows = []
-    regions = [DRONE, "ALL"] + sorted({p["region"] for p in plots})
+    groups = [g for g in GROUPS if g == G_ALL or any(p["group"] == g for p in plots)]
+    if len(groups) == 2: groups = [G_ALL]                  # only one kind of data: the group total = ALL
+    regions = groups + sorted({p["region"] for p in plots})
     for reg in regions:
         for m in models:
             s = acc.get((m, reg))
@@ -194,29 +203,42 @@ def main():
     fig_regions(rows, models, folder / "fig_f1_by_region.png")
     if err: fig_errors(err, folder / "fig_error_types.png")
 
-    n_plots = len({p["plot"] for p in plots}); n_trees = next(r["gt"] for r in rows if r["region"] == "ALL")
-    head = DRONE if any(r["region"] == DRONE for r in rows) and any(p["region"] in NON_DRONE for p in plots) else "ALL"
+    n_plots = len({p["plot"] for p in plots}); n_trees = next(r["gt"] for r in rows if r["region"] == G_ALL)
+    head = groups[0]                                        # real drone plots if any, else synthetic, else ALL
     allrows = sorted([r for r in rows if r["region"] == head], key=lambda r: -r["f1"])
-    everything = sorted([r for r in rows if r["region"] == "ALL"], key=lambda r: -r["f1"])
     best = allrows[0]
     fmt = {"precision": "{:.2f}", "recall": "{:.2f}", "f1": "{:.2f}", "f1_mean": "{:.2f}", "det_f1": "{:.2f}", "seconds": "{:.0f}"}
+    # one line per model, one column per group: F1 (precision / recall)
+    comp = []
+    for r in allrows:
+        row = dict(model=r["model"])
+        for g in groups:
+            q = next((x for x in rows if x["region"] == g and x["model"] == r["model"]), None)
+            row[g] = f"**{q['f1']:.2f}** ({q['precision']:.2f} / {q['recall']:.2f})" if q else "n/a"
+        comp.append(row)
+    gsize = {g: next(x for x in rows if x["region"] == g) for g in groups}
+    gcols = [(f"{g}: {gsize[g]['gt']} trees, {gsize[g]['plots']} plots", g) for g in groups]
     md = [f"# {a.title}\n",
           f"{n_plots} labelled plots, {n_trees} reference trees. A predicted tree counts as correct when it shares at least "
           "half of its points with one reference tree (IoU >= 0.5, one-to-one), the FOR-instance / SegmentAnyTree rule. "
           "Scores are pooled over all trees (bigger plots weigh more).\n",
-          f"Best overall: **{best['model']}**, F1 {best['f1']:.2f} (precision {best['precision']:.2f}, recall {best['recall']:.2f})"
-          + (f" on the {allrows[0]['gt']} trees of drone (ULS/DLS) plots.\n" if head == DRONE else ".\n"),
-          "## Overall" + (" (drone plots only)" if head == DRONE else "") + "\n",
-          T.md_table(allrows, [("Model", "model"), ("Plots", "plots"), ("Reference trees", "gt"), ("Predicted trees", "pred"),
-                               ("Correct", "matched"), ("Precision", "precision"), ("Recall", "recall"), ("F1", "f1"),
-                               ("Mean plot F1", "f1_mean"), ("Tree-top detection F1", "det_f1"), ("Run time (s)", "seconds")], fmt),
+          f"Best on {head.lower() if head != G_ALL else 'all plots'}: **{best['model']}**, F1 {best['f1']:.2f} "
+          f"(precision {best['precision']:.2f}, recall {best['recall']:.2f}).\n",
+          "## Overall\n",
+          "F1 (precision / recall) per group of data:\n\n",
+          T.md_table(comp, [("Model", "model")] + gcols),
           "\nPrecision = share of predicted trees that are correct. Recall = share of reference trees found. "
-          "F1 combines both (1 = perfect).\n"] + ([
-          "\nAll plots including ground-based scans (" + ", ".join(sorted(NON_DRONE)) + "), which look very different from our drone data:\n\n",
-          T.md_table(everything, [("Model", "model"), ("Reference trees", "gt"), ("Predicted trees", "pred"), ("Precision", "precision"),
-                                  ("Recall", "recall"), ("F1", "f1")], fmt)] if head == DRONE else []) + [
+          "F1 combines both (1 = perfect). " + " ".join(t for g, t in [
+              (G_REAL, "Real drone plots = FOR-instanceV2 ULS/DLS plots, the closest to our DJI L2 data."),
+              (G_SYN, "Synthetic eucalypt = Synthetic Forest scenes (simulated scans, cleaner than real ones)."),
+              (G_GROUND, "Ground-based scans = BlueCat and NIBIO_MLS, very different from drone data.")] if g in groups) + "\n",
+          "\nDetails per group:\n\n",
+          T.md_table([r for g in groups for r in sorted([x for x in rows if x["region"] == g], key=lambda x: -x["f1"])],
+                     [("Group", "region"), ("Model", "model"), ("Plots", "plots"), ("Reference trees", "gt"), ("Predicted trees", "pred"),
+                      ("Correct", "matched"), ("Precision", "precision"), ("Recall", "recall"), ("F1", "f1"),
+                      ("Mean plot F1", "f1_mean"), ("Tree-top detection F1", "det_f1"), ("Run time (s)", "seconds")], fmt),
           "\n## By region\n", "![F1 by region](fig_f1_by_region.png)\n",
-          T.md_table([dict(r, info=REGION_INFO.get(r["region"], "")) for r in rows if r["region"] not in ("ALL", DRONE)],
+          T.md_table([dict(r, info=REGION_INFO.get(r["region"], "")) for r in rows if r["region"] not in GROUPS],
                      [("Region", "region"), ("Forest", "info"), ("Model", "model"), ("Plots", "plots"), ("Trees", "gt"),
                       ("Predicted", "pred"), ("Precision", "precision"), ("Recall", "recall"), ("F1", "f1")], fmt)]
     if err:

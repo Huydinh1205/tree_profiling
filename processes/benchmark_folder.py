@@ -1,10 +1,11 @@
-"""Run process 1 + process 3 on every labelled .las in a folder, then pool everything into one
+"""Run process 1 + process 3 on every labelled .las in one or more folders, then pool everything into one
 HTML evaluation report (aggregate_benchmarks.py). Plots already done are skipped, so you can
 stop and re-run.
 
 Usage (Windows, from the processes folder):
   py -3.10 benchmark_folder.py ..\\data\\FOR-instanceV2\\plots_100 --out results\\v2_100
   py -3.10 benchmark_folder.py ..\\data\\FOR-instanceV2\\plots_100 --out results\\v2_100 --models chm_watershed dalponte_py
+  py -3.10 benchmark_folder.py ..\\data\\FOR-instanceV2\\plots_100 ..\\data\\SyntheticForest\\plots_100 --out results\\benchmark_100
 
 Add a model that was run elsewhere (e.g. SegmentAnyTree on usegalaxy.eu), one file per plot with
 the plot's file name, as made by `mosaic_labelled.py split`:
@@ -28,7 +29,7 @@ def run(cmd, log):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("folder", help="folder with labelled .las files (from prep_labelled.py)")
+    ap.add_argument("folders", nargs="+", help="folder(s) with labelled .las files (from prep_labelled.py)")
     ap.add_argument("--out", required=True)
     ap.add_argument("--models", nargs="*", default=["chm_watershed", "dalponte_py", "li2012_py"])
     ap.add_argument("--external", nargs="*", default=[], metavar="NAME=FOLDER",
@@ -39,8 +40,8 @@ def main():
     a = ap.parse_args()
     here = Path(__file__).resolve().parent; py = sys.executable
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
-    files = sorted(Path(a.folder).glob("*.las")) + sorted(Path(a.folder).glob("*.laz"))
-    if not files: sys.exit(f"No .las/.laz in {a.folder}")
+    files = [f for d in a.folders for f in sorted(Path(d).glob("*.las")) + sorted(Path(d).glob("*.laz"))]
+    if not files: sys.exit(f"No .las/.laz in {', '.join(a.folders)}")
     ext = [e.split("=", 1) for e in a.external]
     t0 = time.time()
     for i, f in enumerate(files, 1):
@@ -68,8 +69,8 @@ def main():
             continue
         if changed or not (dst / "errors" / "summary.csv").exists():
             run([py, str(here / "process3_errors.py"), str(f), "--bench", str(dst), "--out", str(dst / "errors")], log)
-    cmd = [py, str(here / "aggregate_benchmarks.py"), *[str(p) for p in sorted(out.iterdir()) if p.is_dir()],
-           "--out", str(out / "summary.md"), "--labelled-dir", str(Path(a.folder))] + (["--title", a.title] if a.title else [])
+    cmd = [py, str(here / "aggregate_benchmarks.py"), *[str(out / f.stem) for f in files if (out / f.stem).is_dir()],
+           "--out", str(out / "summary.md"), "--labelled-dir", *a.folders] + (["--title", a.title] if a.title else [])
     subprocess.run(cmd)
     print(f"\nOpen {out / 'report.html'}")
 

@@ -137,7 +137,8 @@ def examples(plot_dirs, labelled_dir, out_dir, models=None, per_type=None, skip_
                 if (d / "errors" / f"errors_{m}.csv").exists()}
         res[m] = []
         for k, (plot, row) in enumerate(pick(rows, per_type, skip_regions=skip_regions)):
-            las = next((p for p in [Path(labelled_dir) / f"{plot}.las", Path(labelled_dir) / f"{plot}.laz"] if p.exists()), None)
+            dirs = labelled_dir if isinstance(labelled_dir, (list, tuple)) else [labelled_dir]
+            las = next((q for d in dirs for q in [Path(d) / f"{plot}.las", Path(d) / f"{plot}.laz"] if q.exists()), None)
             if las is None: continue
             if plot not in cache:
                 if len(cache) > 6: cache.pop(next(iter(cache)))

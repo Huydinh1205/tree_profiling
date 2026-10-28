@@ -139,18 +139,21 @@ different plots whose tree IDs would collide.
 
 ## 6. Benchmark on many labelled plots (FOR-instanceV2, Synthetic Forest)
 
-Easiest: double-click `processes\run_benchmark_v2.bat`, twice. It first asks which labelled data to use: FOR-instanceV2 (29 real drone plots), Synthetic Forest (3 simulated eucalypt scenes, 8.6 GB download, report in `results\synthetic_100`) or both, then which models.
+Easiest: double-click `processes\run_benchmark_v2.bat`, twice. It asks which labelled data (Enter = both FOR-instanceV2, 29 real
+drone plots, and Synthetic Forest, 3 simulated eucalypt scenes; `1` = FOR-instanceV2 only; `2` = Synthetic Forest only) and which
+models (Enter = 3, `F` = fast). Whatever you choose, there is **one report**: `processes\results\benchmark_100\report.html`,
+with F1 for real drone plots, synthetic plots and all plots side by side.
 
-1. **Run 1** downloads the FOR-instanceV2 test plots if needed (0.4 GB), converts them to 100 pts/m2, makes one file with all
-   plots for SegmentAnyTree (`data\FOR-instanceV2\mosaic_100\mosaic_unlabelled.laz`), opens that folder and usegalaxy.eu,
-   then runs the 3 classical models on this computer (about 40 minutes; type `F` for a fast run with 2 models).
+1. **Run 1** downloads what is missing (0.4 GB FOR-instanceV2, 8.6 GB Synthetic Forest), converts it to 100 pts/m2, makes **one**
+   file with all selected plots for SegmentAnyTree (`data\mosaic_all_100\mosaic_unlabelled.laz`, or `mosaic_v2_100` /
+   `mosaic_syn_100`), opens that folder and usegalaxy.eu, then runs the classical models on this computer.
 2. **Meanwhile on usegalaxy.eu**: upload `mosaic_unlabelled.laz`, run "3DTrees: SegmentAnyTree", download the result and put it
-   in the same `mosaic_100` folder, keeping Galaxy's file name (e.g. `Galaxy5-[Processed Files].zip`, it is really a LAZ).
-3. If the Galaxy file is already there when the models finish, it is added straight away. Otherwise **run 2** of the .bat
-   skips the models that are done and only adds SegmentAnyTree (a few minutes).
+   in the same mosaic folder, keeping Galaxy's file name (e.g. `Galaxy5-[Processed Files].zip`, it is really a LAZ).
+3. If the Galaxy file is already there when the models finish, it is added straight away. Otherwise **run 2** (same choices)
+   skips what is done and only adds SegmentAnyTree.
 
-The result is `processes\results\v2_100\report.html`: F1 overall and by region, error types, one image per model for one plot
-per region, and right/wrong close-ups for every model.
+The report has: F1 per data group, F1 by region, error types, one image per model for one plot per region, and right/wrong
+close-ups for every model.
 
 Manual steps:
 
