@@ -18,10 +18,20 @@ from pathlib import Path
 import numpy as np, laspy
 
 
+
+def expand(paths):
+    """Expand wildcards ourselves: Windows cmd/PowerShell pass *.ply to Python unexpanded."""
+    import glob
+    out = []
+    for p in paths:
+        hits = sorted(glob.glob(p))
+        out += hits if hits else [p]
+    return out
+
 def build(a):
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
     plots = []
-    for f in a.files:
+    for f in expand(a.files):
         L = laspy.read(f); x, y = np.asarray(L.x), np.asarray(L.y)
         plots.append(dict(name=Path(f).stem, file=str(Path(f).resolve()), L=L, w=x.max() - x.min(), h=y.max() - y.min()))
     n = len(plots); cols = math.ceil(math.sqrt(n)); gap = a.gap

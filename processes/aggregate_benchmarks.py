@@ -13,6 +13,16 @@ from pathlib import Path
 import treeseg as T
 
 
+
+def expand(paths):
+    """Expand wildcards ourselves: Windows cmd/PowerShell pass *.ply to Python unexpanded."""
+    import glob
+    out = []
+    for p in paths:
+        hits = sorted(glob.glob(p))
+        out += hits if hits else [p]
+    return out
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("folders", nargs="+", help="process 1 output folders, one per plot")
@@ -20,7 +30,7 @@ def main():
     a = ap.parse_args()
     acc = defaultdict(lambda: dict(gt=0, pred=0, matched=0, f1s=[], plots=0, secs=0.0))
     plots = []
-    for d in a.folders:
+    for d in expand(a.folders):
         d = Path(d); f = d / "scores_all_runs.csv"
         if not f.exists(): continue
         region = d.name.split("_")[0]

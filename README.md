@@ -136,3 +136,20 @@ The RMIT benchmark data is in the repo as `.laz` (`data/RMIT/`, see its README):
 Keeps classification and treeID, removes points with identical coordinates (RMIT train and test
 overlap at the border and train has internal duplicates). Add `--shift-ids` for files from
 different plots whose tree IDs would collide.
+
+## 6. Benchmark on many labelled plots (FOR-instanceV2, Synthetic Forest)
+
+```powershell
+cd tree_profiling\processes
+.\download_datasets.bat                                  # once, about 13 GB into ..\data\
+Expand-Archive ..\data\FOR-instanceV2\test_data.zip ..\data\FOR-instanceV2
+py -3.10 prep_labelled.py "..\data\FOR-instanceV2\test_data\*.ply" --out ..\data\FOR-instanceV2\plots_100 --density 100
+py -3.10 benchmark_folder.py ..\data\FOR-instanceV2\plots_100 --out results\v2_100
+```
+
+* `prep_labelled.py` turns each labelled `.ply` into a labelled `.las` thinned to 100 pts/m2 (close to our DJI L2).
+  Drop `--density` to keep full resolution (much slower for li2012).
+* `benchmark_folder.py` runs process 1 on every plot (skips plots already done, so it can be stopped and re-run)
+  and writes `results\v2_100\summary.md`: pooled precision / recall / F1 per model, per region and overall.
+* For SegmentAnyTree run elsewhere: `mosaic_labelled.py build` puts all plots in one file to run once,
+  `mosaic_labelled.py split` cuts the result back per plot, then pass it to process 1 with `--external sat=<plot>.laz`.

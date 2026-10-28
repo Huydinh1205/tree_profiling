@@ -14,6 +14,16 @@ from pathlib import Path
 import numpy as np, laspy
 
 
+
+def expand(paths):
+    """Expand wildcards ourselves: Windows cmd/PowerShell pass *.ply to Python unexpanded."""
+    import glob
+    out = []
+    for p in paths:
+        hits = sorted(glob.glob(p))
+        out += hits if hits else [p]
+    return out
+
 def load(path):
     p = Path(path)
     if p.suffix.lower() == ".ply":
@@ -49,7 +59,7 @@ def main():
     a = ap.parse_args()
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(a.seed)
-    for f in a.files:
+    for f in expand(a.files):
         x, y, z, cls, t, crs = load(f)
         area = (x.max() - x.min()) * (y.max() - y.min()); dens = len(x) / area
         keep = np.ones(len(x), bool)
