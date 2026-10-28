@@ -9,6 +9,9 @@ and one run. Then split its result back into one file per plot for scoring.
   find:   python mosaic_labelled.py find mosaic_100/index.csv --search %USERPROFILE%/Downloads --out mosaic_100/sat_result.laz
           -> looks for the model's result (e.g. Galaxy's "...[Processed Files].zip", which is really a LAZ) and copies
              the newest file whose point count matches the mosaic; exit code 1 if none is found
+  colour: python mosaic_labelled.py colour mosaic_100/mosaic_labelled.las
+          -> mosaic_100/mosaic_labelled_colour.laz: same points with an RGB colour per tree (ground grey), so any
+             viewer (CloudCompare, QGIS, DJI Terra) shows each tree in its own colour. Works on any file with treeID.
   split:  python mosaic_labelled.py split mosaic_100/index.csv segmented_pc.laz --out mosaic_100/sat_by_plot
           -> one <plot>.laz per plot, in the plot's own coordinates, with the model's tree IDs,
              ready for:  process1_benchmark.py plots_100/<plot>.las --external sat=mosaic_100/sat_by_plot/<plot>.laz
@@ -114,14 +117,39 @@ def find(a):
         shutil.copy(best, a.out)
     print(f"Found {best} ({total:,} points) -> {a.out}")
 
+
+def colour(a):
+    """Copy of a labelled file with one random RGB colour per treeID (ground and other points grey)."""
+    for f in a.files:
+        L = laspy.read(f)
+        names = list(L.point_format.extra_dimension_names) + list(L.point_format.dimension_names)
+        field = a.field or next((n for n in ["treeID", "PredInstance_SAT", "PredInstance"] if n in names), None)
+        if field is None: raise SystemExit(f"{f}: no treeID field ({names})")
+        t = np.asarray(L[field]).astype(np.int64)
+        u, inv = np.unique(t, return_inverse=True); inv = inv.ravel()
+        rng = np.random.default_rng(7); pal = (rng.random((len(u), 3)) * 0.75 + 0.2)
+        pal[u <= 0] = 0.6                                   # unlabelled / ground: grey
+        if "classification" in names:
+            c = np.asarray(L.classification)
+        rgb = (pal[inv] * 65535).astype(np.uint16)
+        hdr = laspy.LasHeader(point_format=7, version="1.4"); hdr.offsets = L.header.offsets; hdr.scales = L.header.scales
+        hdr.add_extra_dim(laspy.ExtraBytesParams(name="treeID", type=np.int32))
+        W = laspy.LasData(hdr); W.x, W.y, W.z = L.x, L.y, L.z
+        if "classification" in names: W.classification = c
+        W.treeID = t.astype(np.int32); W.red, W.green, W.blue = rgb[:, 0], rgb[:, 1], rgb[:, 2]
+        out = Path(f).with_name(Path(f).stem + "_colour.laz"); W.write(out)
+        print(f"{out}: {len(u[u > 0])} trees coloured")
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     b = sub.add_parser("build"); b.add_argument("files", nargs="+"); b.add_argument("--out", required=True); b.add_argument("--gap", type=float, default=30)
     s = sub.add_parser("split"); s.add_argument("index"); s.add_argument("result"); s.add_argument("--out", required=True); s.add_argument("--field")
+    c = sub.add_parser("colour"); c.add_argument("files", nargs="+"); c.add_argument("--field")
     f = sub.add_parser("find"); f.add_argument("index"); f.add_argument("--search", nargs="+", required=True); f.add_argument("--out", required=True)
     a = ap.parse_args()
-    {"build": build, "split": split, "find": find}[a.cmd](a)
+    if a.cmd == "colour": a.files = expand(a.files)
+    {"build": build, "split": split, "find": find, "colour": colour}[a.cmd](a)
 
 
 if __name__ == "__main__":
