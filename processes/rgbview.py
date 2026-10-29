@@ -1,7 +1,8 @@
-"""Interactive true-colour viewer for the evaluation report (used by aggregate_benchmarks.py).
+"""Interactive top-view viewer for the evaluation report (used by aggregate_benchmarks.py).
 
-For a labelled plot whose .las has real RGB (e.g. CedarCypress3D Kokonoe, DJI Zenmuse L2), it makes a top view
-in true colour and one transparent layer per segmentation: the reference trees (ground truth) and each model.
+For each labelled plot it makes a top view and one transparent layer per segmentation: the reference trees
+(ground truth) and each model. The top view is in true colour when the .las has real RGB (e.g. CedarCypress3D
+Kokonoe, DJI Zenmuse L2); otherwise it is the canopy height above ground, shaded like a relief map (e.g. Saiki).
 In report.html, buttons put one layer on top of the photo-like view; a slider sets how strong the colours are.
 Each tree is filled in its own colour with a white outline, so crowns that were merged or split stand out.
 On the model layers a yellow line marks the labelled area (only trees inside it are scored).
@@ -13,7 +14,8 @@ from pathlib import Path
 import numpy as np
 import laspy
 
-RES = 0.1          # m per pixel
+RES = 0.1          # m per pixel (raised for big plots so the image stays about 600 px wide)
+MAX_PX = 600
 CSS = (".rgbv{margin:8px 0 18px}.rgbv .btns{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}"
        ".rgbv button{border:1px solid #1F3864;background:#fff;color:#1F3864;border-radius:4px;padding:5px 10px;"
        "cursor:pointer;font-size:13px}.rgbv button.on{background:#1F3864;color:#fff}"
@@ -66,6 +68,31 @@ def _true_colour(x, y, z, rgb):
     return Image.fromarray((img * 255).astype(np.uint8)), nx, ny
 
 
+def _height_view(x, y, z, ground):
+    """Canopy height above ground, shaded like a relief map (light from the north-west), coloured by height (dark blue low, yellow high)."""
+    import treeseg as T
+    from matplotlib import colormaps
+    from scipy import ndimage as ndi
+    from PIL import Image
+    h = T.height_above_ground(x, y, z, ground) if ground.sum() >= 50 else z - np.percentile(z, 1)
+    nx, ny, flat = _grid(x, y)
+    o = np.argsort(h); chm = np.full(nx * ny, np.nan); chm[flat[o]] = h[o]
+    chm = chm.reshape(ny, nx); empty = np.isnan(chm)
+    chm, left = _fill(np.where(empty, 0, chm), empty, 4)
+    chm = ndi.gaussian_filter(np.maximum(chm, 0), 1.5)
+    gy, gx = np.gradient(chm, RES)
+    slope = np.arctan(np.hypot(gx, gy)); aspect = np.arctan2(-gx, gy)
+    az, alt = np.radians(315), np.radians(40)
+    shade = np.clip(np.sin(alt) * np.cos(slope) + np.cos(alt) * np.sin(slope) * np.cos(az - aspect), 0, 1)
+    can = chm[(chm >= 1) & ~left]
+    lo, hi = (np.percentile(can, [3, 99.5]) if can.size else (0, 1))
+    col = colormaps["viridis"](np.clip((chm - lo) / max(hi - lo, 0.5), 0, 1))[..., :3]
+    img = col * (0.45 + 0.55 * shade[..., None])
+    img[chm < 1] = [0.86, 0.80, 0.68]                         # ground / low vegetation: sand
+    img[left] = 1.0
+    return Image.fromarray((np.clip(img, 0, 1) * 255).astype(np.uint8)), nx, ny
+
+
 def _scored_area(x, y, gt, nx, ny):
     """Outline (bool image) of the labelled area: convex hull of the reference tree points, 2 px wide."""
     from scipy.spatial import ConvexHull
@@ -105,16 +132,23 @@ def _layer(x, y, z, ids, nx, ny, seed, outline=None):
 
 def viewer(las_path, pred_dir, labels, scores, vid):
     """HTML for one plot. labels: {prediction file stem: model name}; scores: {model name: F1 on this plot}."""
+    global RES
     L = laspy.read(las_path)
     x, y, z = np.asarray(L.x), np.asarray(L.y), np.asarray(L.z)
-    rgb = np.c_[np.asarray(L.red), np.asarray(L.green), np.asarray(L.blue)].astype(float)
-    base, nx, ny = _true_colour(x, y, z, rgb)
+    RES = max(0.1, round(max(np.ptp(x), np.ptp(y)) / MAX_PX, 2))
+    photo = "red" in L.point_format.dimension_names and np.asarray(L.red).max() > 0
+    if photo:
+        rgb = np.c_[np.asarray(L.red), np.asarray(L.green), np.asarray(L.blue)].astype(float)
+        base, nx, ny = _true_colour(x, y, z, rgb)
+    else:
+        base, nx, ny = _height_view(x, y, z, np.asarray(L.classification) == 2)
     layers = [("gt", "Ground truth", np.asarray(L.treeID).astype(np.int64), None)]
     for f in sorted(Path(pred_dir).glob("*.npy")):
         ids = np.load(f).astype(np.int64)
         if len(ids) != len(x): continue
         name = labels.get(f.stem, f.stem); layers.append((f.stem, name, ids, scores.get(name)))
-    btn = [f'<button data-k="none" onclick="rgbvShow(\'{vid}\',\'none\')">RGB only</button>']
+    only = "RGB only" if photo else "Height only"
+    btn = [f'<button data-k="none" onclick="rgbvShow(\'{vid}\',\'none\')">{only}</button>']
     imgs = []
     area = _scored_area(x, y, layers[0][2], nx, ny)
     for k, (key, name, ids, f1) in enumerate(layers):
@@ -126,6 +160,6 @@ def viewer(las_path, pred_dir, labels, scores, vid):
     w, h = nx * RES, ny * RES
     return (f'<div class="rgbv" id="{vid}"><div class="btns">{"".join(btn)}</div>'
             f'<div class="hint">Colours on: <input type="range" min="0" max="1" step="0.05" value="0.6" '
-            f'oninput="rgbvAlpha(\'{vid}\',this.value)"> &nbsp; Area {w:.0f} x {h:.0f} m, north up, {RES * 100:.0f} cm pixels.</div>'
-            f'<div class="stage"><img src="data:image/jpeg;base64,{_b64(base, "JPEG", quality=85)}" alt="true colour">'
+            f'oninput="rgbvAlpha(\'{vid}\',this.value)"> &nbsp; {"True colour" if photo else "No colour in this scan: canopy height above ground, shaded"}; area {w:.0f} x {h:.0f} m, north up, {RES * 100:.0f} cm pixels.</div>'
+            f'<div class="stage"><img src="data:image/jpeg;base64,{_b64(base, "JPEG", quality=85)}" alt="top view">'
             f'{"".join(imgs)}</div></div>')

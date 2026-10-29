@@ -156,7 +156,8 @@ def pictures(a, folder, plots, models):
 
 
 def rgb_section(a, plots):
-    """True-colour viewers with buttons (ground truth / each model) for plots whose .las has real RGB."""
+    """Top-view viewers with buttons (ground truth / each model) for every plot: true colour when the .las has
+    real RGB, otherwise shaded canopy height."""
     import html as H
     import rgbview as RV
     lab_dirs = [Path(d) for d in a.labelled_dir]
@@ -166,8 +167,8 @@ def rgb_section(a, plots):
     for k, name in enumerate(sorted(by_plot)):
         las = next((q for d in lab_dirs for q in [d / f"{name}.las", d / f"{name}.laz"] if q.exists()), None)
         pdir = Path(a.out).parent / name / "predictions"
-        if las is None or not pdir.exists() or not RV.has_rgb(las): continue
-        print(f"  RGB view: {name}")
+        if las is None or not pdir.exists(): continue
+        print(f"  top view: {name}")
         labels = {f.stem: T.model_label(f.stem) for f in pdir.glob("*.npy")}
         f1s = by_plot[name]
         best = max(f1s.items(), key=lambda kv: kv[1]) if f1s else None
@@ -175,10 +176,11 @@ def rgb_section(a, plots):
         out.append(f"<details{' open' if not out else ''}><summary>{summ}</summary>"
                    + RV.viewer(las, pdir, labels, f1s, f"rgbv{k}") + "</details>")
     if not out: return ""
-    return ("<h2>True-colour view (RGB)</h2>"
-            "<p>Plots scanned with real colour (DJI Zenmuse L2). Click <b>Ground truth</b> or a model to lay its trees "
-            "over the true-colour view: each tree has its own colour and a white outline. The slider sets how strong the "
-            "colours are. Only trees with their stem inside the plot circle are labelled, so the ground truth stops at the "
+    return ("<h2>Top view with buttons</h2>"
+            "<p>One view per plot: true colour where the scan has it (CedarCypress3D Kokonoe, DJI Zenmuse L2), otherwise "
+            "the canopy height above ground shaded like a relief map (dark blue = low, yellow = the highest crowns). Click <b>Ground truth</b> or a "
+            "model to lay its trees over the view: each tree has its own colour and a white outline. The slider sets how strong the "
+            "colours are. In CedarCypress3D only trees with their stem inside the plot circle are labelled, so the ground truth stops at the "
             "circle while the models also show the trees around it; the <b>yellow line</b> on the model layers marks the labelled area (trees outside it are not scored).</p>" + "\n".join(out) + "\n")
 
 
