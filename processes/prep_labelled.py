@@ -74,7 +74,7 @@ def load_pcd(p, density=None, seed=0):
     c = c.astype(int); tree = (c == 2) | (c == 3)
     t = np.where(tree, inst.astype(np.int64) + 1, 0)            # +1 so an instance 0 tree is not lost
     cls = np.where(c == 1, 2, np.where(tree, 5, 1)).astype(np.uint8)
-    return x, y, z, cls, t, None
+    return x, y, z, cls, t, None, None
 
 
 def load(path, density=None):
@@ -87,7 +87,7 @@ def load(path, density=None):
         x, y, z = (np.asarray(v[k], float) for k in "xyz")
         t = np.asarray(v["treeID"]).astype(np.int64); sem = np.asarray(v["semantic_seg"])
         cls = np.where(sem == 1, 2, np.where(t > 0, 5, 1)).astype(np.uint8)
-        return x, y, z, cls, t, None
+        return x, y, z, cls, t, None, None
     L = laspy.read(p)
     x, y, z = np.asarray(L.x), np.asarray(L.y), np.asarray(L.z)
     cls = np.asarray(L.classification); t = np.asarray(L.treeID).astype(np.int64)
@@ -97,18 +97,28 @@ def load(path, density=None):
         k = cls != 7
         x, y, z, cls, t = x[k], y[k], z[k], cls[k], t[k]
         cls = np.where(cls == 2, 2, np.where(t > 0, 5, 1)).astype(np.uint8)
-    return x, y, z, cls, t, L.header.parse_crs()
+    else:
+        k = np.ones(len(x), bool)
+    rgb = None
+    # keep true colour (CedarCypress3D Kokonoe, DJI L2). Not for FOR-instance v1: its RGB is a colour per label, not a photo.
+    if "treeComponent" in L.point_format.extra_dimension_names and "red" in L.point_format.dimension_names \
+            and np.asarray(L.red).max() > 0:
+        rgb = np.c_[np.asarray(L.red), np.asarray(L.green), np.asarray(L.blue)][k]
+    return x, y, z, cls, t, L.header.parse_crs(), rgb
 
 
-def write(path, x, y, z, cls, t, crs=None):
-    hdr = laspy.LasHeader(point_format=6, version="1.4")
+def write(path, x, y, z, cls, t, crs=None, rgb=None):
+    hdr = laspy.LasHeader(point_format=7 if rgb is not None else 6, version="1.4")
     hdr.offsets = [np.floor(x.min()), np.floor(y.min()), np.floor(z.min())]; hdr.scales = [0.001, 0.001, 0.001]
     hdr.add_extra_dim(laspy.ExtraBytesParams(name="treeID", type=np.int32))
     if crs is not None:
         try: hdr.add_crs(crs)
         except Exception: pass
     W = laspy.LasData(hdr); W.x, W.y, W.z = x, y, z
-    W.classification = cls.astype(np.uint8); W.treeID = t.astype(np.int32); W.write(path)
+    W.classification = cls.astype(np.uint8); W.treeID = t.astype(np.int32)
+    if rgb is not None:
+        W.red, W.green, W.blue = (rgb[:, i].astype(np.uint16) for i in range(3))
+    W.write(path)
 
 
 def main():
@@ -122,7 +132,7 @@ def main():
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(a.seed)
     for f in expand(a.files):
-        x, y, z, cls, t, crs = load(f, a.density)
+        x, y, z, cls, t, crs, rgb = load(f, a.density)
         area = (x.max() - x.min()) * (y.max() - y.min()); dens = len(x) / area
         keep = np.ones(len(x), bool)
         if a.density and dens > a.density:
@@ -142,11 +152,12 @@ def main():
             x = np.r_[x, xs.ravel()]; y = np.r_[y, ys.ravel()]; z = np.r_[z, gzz]
             cls = np.r_[cls, np.full(xs.size, 2, np.uint8)]; t = np.r_[t, np.zeros(xs.size, np.int64)]
             keep = np.r_[keep, np.ones(xs.size, bool)]
+            if rgb is not None: rgb = np.r_[rgb, np.zeros((xs.size, 3), rgb.dtype)]
         if not a.keep_z:
             g = (cls == 2) & keep
             z = z - (np.percentile(z[g], 1) if g.any() else z[keep].min())
         name = Path(f).stem.replace("_annotated_test", "").replace("_test", "").replace("_panoptic", "").replace("_ULS_", "_")
-        write(out / f"{name}.las", x[keep], y[keep], z[keep], cls[keep], t[keep], crs)
+        write(out / f"{name}.las", x[keep], y[keep], z[keep], cls[keep], t[keep], crs, None if rgb is None else rgb[keep])
         nt = len(np.unique(t[keep][t[keep] > 0]))
         print(f"{name}: {len(x):,} -> {keep.sum():,} pts ({dens:.0f} -> {keep.sum() / area:.0f} pts/m2), {nt} trees")
 

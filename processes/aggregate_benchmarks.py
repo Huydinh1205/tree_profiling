@@ -154,6 +154,34 @@ def pictures(a, folder, plots, models):
                    '<div class="gal big">' + "".join(_img(p, c) for p, c in items) + "</div></details>")
     return "\n".join(out) + "\n"
 
+
+def rgb_section(a, plots):
+    """True-colour viewers with buttons (ground truth / each model) for plots whose .las has real RGB."""
+    import html as H
+    import rgbview as RV
+    lab_dirs = [Path(d) for d in a.labelled_dir]
+    by_plot = defaultdict(dict)
+    for p in plots: by_plot[p["plot"]][p["model"]] = p["f1"]
+    out = []
+    for k, name in enumerate(sorted(by_plot)):
+        las = next((q for d in lab_dirs for q in [d / f"{name}.las", d / f"{name}.laz"] if q.exists()), None)
+        pdir = Path(a.out).parent / name / "predictions"
+        if las is None or not pdir.exists() or not RV.has_rgb(las): continue
+        print(f"  RGB view: {name}")
+        labels = {f.stem: T.model_label(f.stem) for f in pdir.glob("*.npy")}
+        f1s = by_plot[name]
+        best = max(f1s.items(), key=lambda kv: kv[1]) if f1s else None
+        summ = f"{H.escape(name)} ({region_of(name)}; best F1 {best[1]:.2f}, {H.escape(best[0])})" if best else H.escape(name)
+        out.append(f"<details{' open' if not out else ''}><summary>{summ}</summary>"
+                   + RV.viewer(las, pdir, labels, f1s, f"rgbv{k}") + "</details>")
+    if not out: return ""
+    return ("<h2>True-colour view (RGB)</h2>"
+            "<p>Plots scanned with real colour (DJI Zenmuse L2). Click <b>Ground truth</b> or a model to lay its trees "
+            "over the true-colour view: each tree has its own colour and a white outline. The slider sets how strong the "
+            "colours are. Only trees with their stem inside the plot circle are labelled, so the ground truth stops at the "
+            "circle while the models also show the trees around it; the <b>yellow line</b> on the model layers marks the labelled area (trees outside it are not scored).</p>" + "\n".join(out) + "\n")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("folders", nargs="+", help="process 1 output folders, one per plot")
@@ -270,7 +298,7 @@ def main():
                "DJI Zenmuse L2, like our data; Saiki with a RIEGL VUX-1LR. Even-aged conifer plantations, so easier than native forest.\n"]
     gallery = ""
     if a.labelled_dir and not a.no_pictures:
-        gallery = pictures(a, folder, plots, models)
+        gallery = rgb_section(a, plots) + pictures(a, folder, plots, models)
         md.insert(md.index("\n## Per plot\n"), "\n## Pictures\nSee report.html (plot views in `views/`, examples in `examples/`).\n")
     text = "\n".join(p.rstrip("\n") + "\n" for p in md)
     out_md.write_text(text, encoding="utf-8")
@@ -282,7 +310,9 @@ def main():
         cut = html.find("<h2>Pictures</h2>")
         end = html.find("<h2>", cut + 5)
         html = html[:cut] + gallery + html[end:]
-        html = html.replace("</style>", GALLERY_CSS + "</style>")
+        import rgbview as RV
+        html = html.replace("</style>", GALLERY_CSS + RV.CSS + "</style>")
+        if 'class="rgbv"' in gallery: html = html.replace("</body>", RV.JS + "</body>") if "</body>" in html else html + RV.JS
     (folder / "report.html").write_text(html, encoding="utf-8")
     for r in allrows:
         print(f"{r['model']:32s} pooled F1 {r['f1']:.2f} (P {r['precision']:.2f} R {r['recall']:.2f}) on {r['gt']} trees")

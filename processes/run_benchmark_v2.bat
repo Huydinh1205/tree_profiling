@@ -222,7 +222,9 @@ echo Preparing the 3 synthetic scenes at 100 pts/m2 (40 million lines each, a fe
 exit /b 0
 
 :prep_ced
-if exist "%CED%\plots_100\*.las" exit /b 0
+REM rgb_kept.txt marks plots prepared with their true colour (since 29/10/2026); older ones are prepared again
+REM (same points, so finished model runs and Galaxy results stay valid).
+if exist "%CED%\plots_100\rgb_kept.txt" exit /b 0
 if exist "%CED%\Kokonoe\plot_1\Kokonoe_ULS_plot-1.las" goto ced_unzipped
 if exist "%CED%\CedarCypress3D_data.zip" goto ced_unzip
 echo Downloading CedarCypress3D (3 GB)...
@@ -234,4 +236,5 @@ echo Unzipping the drone point clouds and field data (the terrestrial scans and 
 :ced_unzipped
 echo Preparing 34 labelled plots at 100 pts/m2...
 %PY% prep_labelled.py "%CED%\*\plot_*\*_ULS_*.las" --out "%CED%\plots_100" --density 100 || exit /b 1
+echo prepared with true colour > "%CED%\plots_100\rgb_kept.txt"
 exit /b 0

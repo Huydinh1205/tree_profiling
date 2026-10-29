@@ -161,7 +161,9 @@ Easiest: double-click `processes\run_benchmark_v2.bat`, twice. It asks which lab
 The old single folder `results\benchmark_100` (FOR-instanceV2 only) is renamed to `results\benchmark_v2_100` on the first run.
 
 The report has: F1 per data group, F1 by region, error types, one image per model for one plot per region, and right/wrong
-close-ups for every model.
+close-ups for every model. Plots with real colour (CedarCypress3D Kokonoe, DJI L2) also get a **true-colour view with buttons**:
+"Ground truth" or a model lays its trees over the RGB view (one colour per tree, white outlines, yellow line = labelled area),
+with a slider for how strong the colours are (`rgbview.py`).
 
 Manual steps:
 
