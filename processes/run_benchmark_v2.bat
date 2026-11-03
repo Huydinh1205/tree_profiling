@@ -8,6 +8,8 @@ REM   Synthetic Forest -> results\benchmark_syn_100\report.html
 REM   CedarCypress3D   -> results\benchmark_ced_100\report.html
 REM Run 1: prepares the data, makes one file per dataset for SegmentAnyTree on usegalaxy.eu, runs the classical models here.
 REM Run 2 (same choices, after you put the Galaxy results in the mosaic folders): adds SegmentAnyTree to the reports.
+REM Or, with Docker Desktop + the NVIDIA GPU on this computer: model choice S (SegmentAnyTree only) or A (all) runs
+REM SegmentAnyTree here (sat_docker.py) on each mosaic, so Galaxy is not needed. Results go to the same folders.
 
 REM ---- Python 3.10 (the company Python, no venv) ----
 set "PY="
@@ -48,14 +50,22 @@ echo Unknown choice. Type 1, 2, 3 or press Enter.
 goto failed
 :sel_ok
 echo.
-echo Which classical models?
-echo   Enter = 3 models (CHM watershed, Dalponte, li2012; li2012 is slow)
+echo Which models?
+echo   Enter = 3 classical models (CHM watershed, Dalponte, li2012; li2012 is slow)
 echo   F     = fast: CHM watershed + Dalponte only
-echo   (plots and models already done are skipped, so a second run only adds what is new)
+echo   S     = SegmentAnyTree only, run with Docker on this computer (open Docker Desktop first)
+echo   A     = all: the 3 classical models + SegmentAnyTree with Docker
+echo   (plots, models and SegmentAnyTree results already done are skipped, so a second run only adds what is new)
 set "MODE="
 set /p "MODE=Choice: "
+set "RUNSAT="
 set "MODELS=chm_watershed dalponte_py li2012_py"
 if /i "%MODE%"=="F" set "MODELS=chm_watershed dalponte_py"
+if /i "%MODE%"=="S" set "MODELS="
+if /i "%MODE%"=="S" set "RUNSAT=1"
+if /i "%MODE%"=="A" set "RUNSAT=1"
+set "MLABEL=%MODELS%"
+if not defined MODELS set "MLABEL=SegmentAnyTree scoring only"
 
 set "V2=..\data\FOR-instanceV2"
 set "SYN=..\data\SyntheticForest"
@@ -127,7 +137,7 @@ exit /b 0
 :mosaic
 call :vars %1
 if exist "%MOS%\index.csv" goto mosaic_ok
-echo Putting all %NAME% plots in one file for usegalaxy.eu...
+echo Putting all %NAME% plots in one file for SegmentAnyTree...
 %PY% mosaic_labelled.py build "%PLOTS%\*.las" --out "%MOS%" || exit /b 1
 :mosaic_ok
 %PY% mosaic_labelled.py find "%MOS%\index.csv" --search "%MOS%" --out "%MOS%\sat_result.laz" >nul 2>&1
@@ -135,9 +145,17 @@ if errorlevel 1 goto mosaic_nosat
 echo   %NAME%: SegmentAnyTree result found, it will be in the report.
 exit /b 0
 :mosaic_nosat
+if defined RUNSAT goto mosaic_docker
 set "NEEDSAT=1"
 echo   %NAME%: SegmentAnyTree not run yet. Upload from: %CD%\%MOS%
 start "" "%MOS%"
+exit /b 0
+:mosaic_docker
+echo.
+echo ===== %NAME%: running SegmentAnyTree with Docker on this computer (minutes to hours, keep this window open) ...
+%PY% sat_docker.py "%MOS%\mosaic_unlabelled.laz" --out "%MOS%\sat_result.laz" --log "%MOS%\sat_docker.log" || exit /b 1
+%PY% mosaic_labelled.py find "%MOS%\index.csv" --search "%MOS%" --out "%MOS%\sat_result.laz" || exit /b 1
+echo   %NAME%: SegmentAnyTree done, it will be in the report.
 exit /b 0
 
 :run
@@ -149,7 +167,7 @@ if errorlevel 1 goto run_models
 set "EXTRA=--external sat=%MOS%\sat_by_plot"
 :run_models
 echo.
-echo ===== %NAME%: running %MODELS% ... results go to %CD%\%OUT%
+echo ===== %NAME%: running %MLABEL% ... results go to %CD%\%OUT%
 %PY% benchmark_folder.py "%PLOTS%" --out "%OUT%" --models %MODELS% %EXTRA% --title "%TITLE%" || exit /b 1
 if defined EXTRA exit /b 0
 REM Galaxy finished while the models were running? Add it now.
