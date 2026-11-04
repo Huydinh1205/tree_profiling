@@ -2,21 +2,26 @@
 
 SegmentAnyTree was trained mostly on European/temperate forest plots. On broad, clumpy, open-grown crowns
 (eucalypts, paddock trees, windbreak rows) it often cuts one crown into several pieces. This script merges
-pieces back together with three rules, always into a neighbour the piece actually touches (3D contact):
+pieces back together, always into a neighbour the piece actually touches (3D contact):
 
-  1. fragment   piece with a top-view area under --min-area m2
-  2. stemless   piece whose lowest points (2nd percentile) are more than --stemless m above ground, i.e. a crown
-                piece with no stem of its own
-  3. no valley  two touching pieces whose canopy profile between their tops has no real dip
-                (dip < max(--dip-min m, --dip-frac x lower top height)) and whose tops are closer than
-                --top-dist x taller top height
+  1. no own top  right next to the piece's highest point (within --apex-r m) the neighbour is as high or
+                 higher (down to --apex-dz m lower), and the neighbour does not cover that top. Pieces of one
+                 crown look like that; two real trees each have their own top, and a lower tree under a
+                 neighbour's crown is left alone.
+  2. fragment    a piece without a stem smaller than --min-area m2 (top view).
 
-A merge is only allowed if the merged crown still fits inside a circle of radius
---crown-k x height + --crown-c m around the taller top. Raise --crown-k to merge more, lower it to merge less.
+Two pieces that both have a stem (points within 2 m of the ground) are never merged. DJI L2 over dense canopy
+often shows no stems at all, so the rules do not rely on stems being visible. A merge is only allowed if the
+merged crown still fits inside a circle of radius --crown-k x height + --crown-c m around the taller top.
+
+Checked 4/11/2026 on labelled plots (RMIT eucalypt, CedarCypress3D Kokonoe = DJI L2, Saiki): on correct trees
+it leaves F1 at 0.90 to 1.00 (the first version of this script, with a "stemless" and a "no valley" rule,
+dropped them to 0.00 to 0.51 and FOR-instanceV2 from 0.78 to 0.15); crowns cut into 3 pieces on purpose
+are put back together (F1 0.2 to 0.4 -> 0.79 to 0.96).
 
 Usage:
   python merge_sat.py "Galaxy16-[Processed Files].laz"            (several files allowed)
-  python merge_sat.py result.laz --crown-k 0.35                     (more cautious)
+  python merge_sat.py result.laz --apex-r 0.5                       (merges more)
 
 Writes next to each input:
   <name>_merged.laz         same points and attributes (true RGB kept); PredInstance_SAT = merged tree IDs,
@@ -40,9 +45,18 @@ import treeseg as ts
 FIELDS = ["PredInstance_SAT", "PredInstance", "preds_instance_segmentation", "treeID", "TreeID"]
 
 
-def merge_oversegments(x, y, h, ids, res=0.5, voxel=0.5, min_contact=5, min_area=4.0, stemless=3.0,
-                       dip_frac=0.2, dip_min=1.0, top_dist=0.5, crown_k=0.45, crown_c=2.0):
-    """Return (merged ids, log rows). ids: one int per point, 0 = not a tree. h = height above ground."""
+def merge_oversegments(x, y, h, ids, res=0.25, voxel=0.5, min_contact=5, min_area=4.0, apex_r=0.3, apex_dz=0.3,
+                       stem_h=2.0, stem_pts=3, crown_k=0.45, crown_c=2.0):
+    """Return (merged ids, log rows, stats). ids: one int per point, 0 = not a tree. h = height above ground.
+
+    A piece is only merged into a neighbour it touches in 3D, never so that the merged crown leaves the circle
+    crown_k x height + crown_c around the taller top, and never when both pieces have a stem (at least stem_pts
+    points lower than stem_h m above ground). Rules:
+      no own top  right next to the piece's highest point (within apex_r m) the neighbour is as high or higher
+                  (down to apex_dz m lower), and the neighbour's crown does not cover that top. A crown cut into
+                  pieces gives pieces like that; two real trees each have their own top. A tree whose top is
+                  under a neighbour's crown is left alone (it is a lower tree, not a piece).
+      fragment    a piece without a stem, smaller than min_area m2 (top view)."""
     ids = ts.relabel(ids)
     x0, y0 = x.min(), y.min()
     ci = ((x - x0) / res).astype(np.int64); cj = ((y - y0) / res).astype(np.int64)
@@ -76,7 +90,7 @@ def merge_oversegments(x, y, h, ids, res=0.5, voxel=0.5, min_contact=5, min_area
         if cc >= min_contact:
             a, b = divmod(kk, nmax); contact.setdefault(a, {})[b] = cc; contact.setdefault(b, {})[a] = cc
 
-    # --- per piece: top, base, top-view raster (cell -> max height)
+    # --- per piece: top, stem, top-view raster (cell -> max height)
     order = np.argsort(ids, kind="stable"); sid = ids[order]
     u = np.unique(ids[tree])
     starts = np.searchsorted(sid, u); ends = np.searchsorted(sid, u, side="right")
@@ -85,8 +99,10 @@ def merge_oversegments(x, y, h, ids, res=0.5, voxel=0.5, min_contact=5, min_area
         p = order[s:e]; j = p[np.argmax(hp[p])]
         cc = ci[p] * H + cj[p]; oo = np.argsort(hp[p])
         r = dict(zip(cc[oo].tolist(), hp[p][oo].tolist()))
-        info[t] = dict(top=float(hp[j]), tx=float(x[j]), ty=float(y[j]), base=float(np.percentile(hp[p], 2)),
-                       n=len(p), r=r)
+        info[t] = dict(top=float(hp[j]), tx=float(x[j]), ty=float(y[j]), n=len(p), r=r,
+                       stem=bool((hp[p] < stem_h).sum() >= stem_pts))
+    tall = [t for t in info if info[t]["top"] > 5]
+    share = float(np.mean([info[t]["stem"] for t in tall])) if tall else 0.0
 
     parent = {t: t for t in info}
     def find(t):
@@ -101,21 +117,14 @@ def merge_oversegments(x, y, h, ids, res=0.5, voxel=0.5, min_contact=5, min_area
         px = x0 + (c // H + 0.5) * res; py = y0 + (c % H + 0.5) * res
         return float(np.hypot(px - A["tx"], py - A["ty"]).max()) <= crown_k * A["top"] + crown_c
 
-    def dip(a, b):
-        """Drop of the two pieces' own canopy below the lower top, along the line between the tops."""
-        A, B = info[a], info[b]
-        L = float(np.hypot(B["tx"] - A["tx"], B["ty"] - A["ty"])); n = max(int(L / (res / 2)), 2)
-        s = np.linspace(0, 1, n)
-        qi = ((A["tx"] + (B["tx"] - A["tx"]) * s - x0) / res).astype(np.int64)
-        qj = ((A["ty"] + (B["ty"] - A["ty"]) * s - y0) / res).astype(np.int64)
-        ra, rb = A["r"], B["r"]; low = np.inf
-        for i_, j_ in zip(qi.tolist(), qj.tolist()):
-            v = 0.0
-            for di in (-1, 0, 1):
-                for dj in (-1, 0, 1):
-                    c = (i_ + di) * H + j_ + dj; v = max(v, ra.get(c, 0.0), rb.get(c, 0.0))
-            low = min(low, v)
-        return min(A["top"], B["top"]) - low, L
+    kr = max(1, int(round(apex_r / res)))
+    disk = [(di, dj) for di in range(-kr, kr + 1) for dj in range(-kr, kr + 1) if di * di + dj * dj <= kr * kr]
+    def near_top(t, nb):
+        """(highest canopy of nb within apex_r of t's top, canopy of nb right above t's top)"""
+        A = info[t]; i0 = int((A["tx"] - x0) / res); j0 = int((A["ty"] - y0) / res); rb = info[nb]["r"]; v = -1.0
+        for di, dj in disk:
+            v = max(v, rb.get((i0 + di) * H + j0 + dj, -1.0))
+        return v, rb.get(i0 * H + j0, -1.0)
 
     log = []
     def union(a, b, why):
@@ -123,7 +132,7 @@ def merge_oversegments(x, y, h, ids, res=0.5, voxel=0.5, min_contact=5, min_area
         log.append(dict(piece=b, into=a, rule=why, piece_top_m=round(info[b]["top"], 2),
                         piece_area_m2=round(area(b), 1), x=round(info[b]["tx"], 2), y=round(info[b]["ty"], 2)))
         parent[b] = a; A, B = info[a], info[b]
-        A["n"] += B["n"]; A["base"] = min(A["base"], B["base"])
+        A["n"] += B["n"]; A["stem"] = A["stem"] or B["stem"]
         for c, v in B["r"].items():
             if v > A["r"].get(c, -1.0): A["r"][c] = v
         for nb, cc in contact.pop(b, {}).items():
@@ -133,42 +142,32 @@ def merge_oversegments(x, y, h, ids, res=0.5, voxel=0.5, min_contact=5, min_area
         contact.get(a, {}).pop(b, None)
         return a
 
-    # pass 1: fragments and stemless pieces, smallest first, into the touching neighbour with most contact
+    def both_stems(a, b): return info[a]["stem"] and info[b]["stem"]
+
     changed = True
     while changed:
         changed = False
-        for t in sorted(contact, key=lambda t: info[t]["n"]):
+        # no own top: lowest pieces first, into the neighbour that is highest right next to their top
+        for t in sorted(contact, key=lambda t: info[t]["top"]):
             if find(t) != t or not contact.get(t): continue
-            frag = area(t) < min_area
-            stem = stemless is not None and info[t]["base"] > stemless
-            if not (frag or stem): continue
+            best = None
+            for nb in contact[t]:
+                if both_stems(t, nb): continue
+                v, above = near_top(t, nb)
+                if above > info[t]["top"] + apex_dz: continue       # t's top is under nb's crown: a tree below
+                if v >= info[t]["top"] - apex_dz and (best is None or v > best[0]): best = (v, nb)
+            if best and fits(best[1], t):
+                union(best[1], t, "no own top"); changed = True
+        # small fragments without a stem, smallest first, into the touching neighbour with most contact
+        for t in sorted(contact, key=lambda t: info[t]["n"]):
+            if find(t) != t or not contact.get(t) or info[t]["stem"] or area(t) >= min_area: continue
             for nb, _ in sorted(contact[t].items(), key=lambda kv: -kv[1]):
                 if fits(nb, t):
-                    union(nb, t, "fragment" if frag else "stemless"); changed = True; break
-
-    # pass 2: no valley between tops; best pair first, re-evaluate pairs touching the merged tree
-    cache = {}
-    def cand(a, b):
-        k = (min(a, b), max(a, b))
-        if k not in cache:
-            d, L = dip(a, b); lo = min(info[a]["top"], info[b]["top"]); hi = max(info[a]["top"], info[b]["top"])
-            ok = d < max(dip_min, dip_frac * lo) and L < top_dist * hi and fits(a, b)
-            cache[k] = (d / max(lo, 0.1)) if ok else None
-        return cache[k]
-    while True:
-        best = None
-        for a, nbs in contact.items():
-            for b in nbs:
-                if a < b:
-                    c = cand(a, b)
-                    if c is not None and (best is None or c < best[0]): best = (c, a, b)
-        if best is None: break
-        root = union(best[1], best[2], "no valley")
-        cache = {k: v for k, v in cache.items() if best[1] not in k and best[2] not in k}
+                    union(nb, t, "fragment"); changed = True; break
 
     lut = np.zeros(int(ids.max()) + 1, np.int64)
     for t in info: lut[t] = find(t)
-    return ts.relabel(lut[ids]), log
+    return ts.relabel(lut[ids]), log, dict(stem_share=share)
 
 
 def fast_hag(x, y, z, ground, res=0.5):
@@ -238,11 +237,11 @@ def process(path, a):
     raw = np.asarray(L[field]).astype(np.int64); raw[raw < 0] = 0
     print(f"{path.name}: {cloud.n:,} points, ground from {cloud.ground_source}, field {field}, "
           f"{len(np.unique(raw[raw > 0]))} trees")
-    new, log = merge_oversegments(cloud.x, cloud.y, cloud.h, raw, min_area=a.min_area,
-                                  stemless=None if a.stemless <= 0 else a.stemless, dip_frac=a.dip_frac,
-                                  dip_min=a.dip_min, top_dist=a.top_dist, crown_k=a.crown_k, crown_c=a.crown_c)
-    rules = {r: sum(1 for g in log if g["rule"] == r) for r in ("fragment", "stemless", "no valley")}
-    print(f"  merged into {len(np.unique(new[new > 0]))} trees  ({rules})")
+    new, log, st = merge_oversegments(cloud.x, cloud.y, cloud.h, raw, min_area=a.min_area, apex_r=a.apex_r,
+                                      apex_dz=a.apex_dz, crown_k=a.crown_k, crown_c=a.crown_c)
+    rules = {r: sum(1 for g in log if g["rule"] == r) for r in ("no own top", "fragment")}
+    print(f"  merged into {len(np.unique(new[new > 0]))} trees  ({rules}; "
+          f"{st['stem_share']:.0%} of the pieces taller than 5 m show a stem)")
 
     stem = path.stem
     out = path.with_name(stem + "_merged.laz")
@@ -270,12 +269,12 @@ def main():
     ap.add_argument("--ground", default="auto", choices=["auto", "file", "csf"])
     ap.add_argument("--crown-k", type=float, default=0.45, help="max crown radius = k x height + c (default 0.45)")
     ap.add_argument("--crown-c", type=float, default=2.0, help="(default 2.0 m)")
-    ap.add_argument("--min-area", type=float, default=4.0, help="pieces smaller than this (m2, top view) are merged")
-    ap.add_argument("--stemless", type=float, default=3.0, help="pieces whose base is higher than this (m) are "
-                                                                 "merged; 0 turns the rule off")
-    ap.add_argument("--dip-frac", type=float, default=0.2)
-    ap.add_argument("--dip-min", type=float, default=1.0)
-    ap.add_argument("--top-dist", type=float, default=0.5)
+    ap.add_argument("--min-area", type=float, default=4.0, help="stemless pieces smaller than this (m2, top view) "
+                                                                 "are merged (default 4)")
+    ap.add_argument("--apex-r", type=float, default=0.3, help="'no own top' looks this far around a piece's top "
+                                                               "(m, default 0.3; larger merges more)")
+    ap.add_argument("--apex-dz", type=float, default=0.3, help="... for a neighbour at most this much lower "
+                                                                "(m, default 0.3; larger merges more)")
     ap.add_argument("--no-figure", action="store_true")
     a = ap.parse_args()
     import glob
