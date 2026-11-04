@@ -5,6 +5,7 @@ title SegmentAnyTree on this computer (full density)
 REM Drag one or more of OUR point clouds (.las / .laz, e.g. a DJI Terra export) onto this file.
 REM Each file is used at FULL density (nothing is thinned) and never leaves this computer:
 REM   1. SegmentAnyTree v1 with Docker on this computer (Docker Desktop must be running)   -> sat_result.laz
+REM      (+ sat_result_colour.laz: the same trees before merging, one colour per tree, to view)
 REM   2. merge_sat.py joins crowns that SegmentAnyTree cut into pieces                      -> sat_result_merged.laz
 REM      (+ sat_result_merged_colour.laz to view, _merged.png before/after, _merged_log.csv)
 REM   3. process 2 report: CHM watershed + SegmentAnyTree raw + merged, tree tables, crown polygons -> report.html
@@ -34,6 +35,7 @@ echo --- 1/3 SegmentAnyTree with Docker, full density (a big file can take hours
 %PY% sat_docker.py "%~f1" --out "%OUT%\sat_result.laz" --log "%OUT%\sat_docker.log"
 if errorlevel 1 goto failed
 :have_sat
+if not exist "%OUT%\sat_result_colour.laz" %PY% mosaic_labelled.py colour "%OUT%\sat_result.laz"
 echo --- 2/3 merging crowns cut into pieces (merge_sat.py)
 %PY% merge_sat.py "%OUT%\sat_result.laz"
 if errorlevel 1 goto failed
@@ -46,7 +48,8 @@ goto next
 
 :done
 echo.
-echo Done. Open report.html in each results folder; view the trees in sat_result_merged_colour.laz (CloudCompare).
+echo Done. Open report.html in each results folder. In CloudCompare compare sat_result_colour.laz (before merging)
+echo with sat_result_merged_colour.laz (after).
 if defined LAST start "" "%LAST%"
 pause
 exit /b 0

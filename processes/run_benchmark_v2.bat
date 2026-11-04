@@ -174,7 +174,10 @@ exit /b 0
 :mosaic_docker
 echo.
 echo ===== %NAME%: running SegmentAnyTree with Docker on this computer (minutes to hours, keep this window open) ...
-%PY% sat_docker.py "%MOS%\mosaic_unlabelled.laz" --out "%MOS%\sat_result.laz" --log "%MOS%\sat_docker.log" || exit /b 1
+REM --index: a mosaic of more than 20 million points (CedarCypress3D / Synthetic Forest at original density) runs in
+REM groups of whole plots, otherwise Windows kills SegmentAnyTree for lack of RAM (SIGKILL). Finished groups are
+REM kept in sat_result_parts\, so running the .bat again resumes where it stopped.
+%PY% sat_docker.py "%MOS%\mosaic_unlabelled.laz" --out "%MOS%\sat_result.laz" --log "%MOS%\sat_docker.log" --index "%MOS%\index.csv" || exit /b 1
 %PY% mosaic_labelled.py find "%MOS%\index.csv" --search "%MOS%" --out "%MOS%\sat_result.laz" || exit /b 1
 echo   %NAME%: SegmentAnyTree done, it will be in the report.
 exit /b 0
