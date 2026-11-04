@@ -4,7 +4,7 @@ cd /d "%~dp0"
 title Colour each tree
 REM Drag one or more segmentation results (e.g. the "Galaxy14-[Processed Files].zip" from Galaxy, any .las/.laz with
 REM PredInstance_SAT or treeID) onto this file. For each one it writes <name>_colour.laz next to it: every tree in its own
-REM colour, ground and unassigned points grey. Open that file in CloudCompare, QGIS or DJI Terra: no settings needed.
+REM colour, ground and unassigned points in their real colour (grey if the file has none). Open that file in CloudCompare, QGIS or DJI Terra: no settings needed.
 
 set "PY="
 py -3.10 -c "import sys" >nul 2>&1 && set "PY=py -3.10"

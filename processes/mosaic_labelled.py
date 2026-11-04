@@ -10,7 +10,8 @@ and one run. Then split its result back into one file per plot for scoring.
           -> looks for the model's result (e.g. Galaxy's "...[Processed Files].zip", which is really a LAZ) and copies
              the newest file whose point count matches the mosaic; exit code 1 if none is found
   colour: python mosaic_labelled.py colour mosaic_100/mosaic_labelled.las
-          -> mosaic_100/mosaic_labelled_colour.laz: same points with an RGB colour per tree (ground grey), so any
+          -> mosaic_100/mosaic_labelled_colour.laz: same points with an RGB colour per tree (ground keeps its real
+             colour when the file has one, else grey; --grey forces grey), so any
              viewer (CloudCompare, QGIS, DJI Terra) shows each tree in its own colour. Works on any file with treeID.
   split:  python mosaic_labelled.py split mosaic_100/index.csv segmented_pc.laz --out mosaic_100/sat_by_plot
           -> one <plot>.laz per plot, in the plot's own coordinates, with the model's tree IDs,
@@ -139,6 +140,12 @@ def colour(a):
         if "classification" in names:
             c = np.asarray(L.classification)
         rgb = (pal[inv] * 65535).astype(np.uint16)
+        # a file with real colour (DJI L2, colourised cloud): ground and non-tree points keep their photo colour,
+        # only the trees are painted, like the report's top views. --grey paints them grey instead.
+        if not getattr(a, "grey", False) and "red" in names and int(np.asarray(L.red).max()) > 0:
+            bg = t <= 0
+            for k, ch in enumerate(("red", "green", "blue")):
+                rgb[bg, k] = np.asarray(L[ch])[bg]
         hdr = laspy.LasHeader(point_format=7, version="1.4"); hdr.offsets = L.header.offsets; hdr.scales = L.header.scales
         hdr.add_extra_dim(laspy.ExtraBytesParams(name="treeID", type=np.int32))
         W = laspy.LasData(hdr); W.x, W.y, W.z = L.x, L.y, L.z
@@ -152,7 +159,7 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     b = sub.add_parser("build"); b.add_argument("files", nargs="+"); b.add_argument("--out", required=True); b.add_argument("--gap", type=float, default=30)
     s = sub.add_parser("split"); s.add_argument("index"); s.add_argument("result"); s.add_argument("--out", required=True); s.add_argument("--field")
-    c = sub.add_parser("colour"); c.add_argument("files", nargs="+"); c.add_argument("--field")
+    c = sub.add_parser("colour"); c.add_argument("files", nargs="+"); c.add_argument("--field"); c.add_argument("--grey", action="store_true", help="ground and non-tree points grey, not their real colour")
     f = sub.add_parser("find"); f.add_argument("index"); f.add_argument("--search", nargs="+", required=True); f.add_argument("--out", required=True)
     a = ap.parse_args()
     if a.cmd == "colour": a.files = expand(a.files)
