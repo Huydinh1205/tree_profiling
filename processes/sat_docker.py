@@ -122,10 +122,14 @@ def main():
         inp = td / f"input{ext}"
         outd = td / "out"; outd.mkdir()
         shutil.copy(src, inp)
+        # SegmentAnyTree works in /work INSIDE the container (Docker's own Linux disk) and only the final
+        # LAS/LAZ is copied out to /result. Working directly on the Windows folder (through WSL) is slow and
+        # can fail with "No such file or directory" when the pipeline deletes and re-creates its folders.
+        inner = (f"mkdir -p /work && python3.8 /src/run.py --dataset-path /in/input{ext} --output-dir /work "
+                 f"--log-file false && mkdir -p /result/final && "
+                 f"cp /work/03_output_SAT/final_results/*.la[sz] /result/final/")
         cmd = [docker, "run", "--rm", "--gpus", "all",
-               "-v", f"{inp}:/in/input{ext}:ro", "-v", f"{outd}:/out", a.image,
-               "python3.8", "/src/run.py", "--dataset-path", f"/in/input{ext}", "--output-dir", "/out",
-               "--log-file", "false"]
+               "-v", f"{inp}:/in/input{ext}:ro", "-v", f"{outd}:/result", a.image, "bash", "-c", inner]
         with open(log_path, "w", encoding="utf-8") as log:
             log.write("$ " + " ".join(cmd) + "\n")
             p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
@@ -133,14 +137,12 @@ def main():
             for line in p.stdout:
                 print(line, end="", flush=True); log.write(line)
             rc = p.wait()
-        if rc != 0:
-            fail(f"Docker run failed (exit code {rc}). Last lines are above; full output in {log_path}.\n"
-                 "If it says 'CUDA out of memory', the file is too big for the GPU: run the plots one by one with "
-                 "benchmark_folder.py --models segmentanytree, or crop the file.")
-        res = sorted((outd / "03_output_SAT" / "final_results").glob("*.la[sz]")) or \
-              sorted(f for f in outd.rglob("*.la[sz]") if f.name != inp.name)
-        if not res:
-            fail(f"Docker finished but produced no LAS/LAZ. Full output in {log_path}.")
+        res = sorted((outd / "final").glob("*.la[sz]"))
+        if rc != 0 or not res:
+            fail(f"SegmentAnyTree produced no result (Docker exit code {rc}). Look for 'Traceback' or 'Error' in the "
+                 f"lines above; full output in {log_path}.\n"
+                 "'CUDA out of memory' = the file is too big for the GPU: crop it, or for the benchmark run the "
+                 "plots one by one with benchmark_folder.py --models segmentanytree.")
         print(f"\nSegmentAnyTree done in {(time.time() - t0) / 60:.1f} min. Writing {out} ...", flush=True)
         remap_to_input(src, res[0], out)
     print(f"Done -> {out}", flush=True)
