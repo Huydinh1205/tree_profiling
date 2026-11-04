@@ -1,11 +1,17 @@
 """Run SegmentAnyTree v1 (NIBIO 2024, 3DTrees Docker image) on ONE point cloud on this computer.
 
-run_benchmark_v2.bat (model choice S or A) runs it on each dataset's mosaic instead of usegalaxy.eu:
+run_benchmark_v2.bat (model choice S or A) runs it on each dataset's mosaic instead of usegalaxy.eu, and
+run_segmentanytree.bat on our own point clouds:
   py -3.10 sat_docker.py ..\\data\\mosaic_v2_100\\mosaic_unlabelled.laz --out ..\\data\\mosaic_v2_100\\sat_result.laz
 
 Needs Docker Desktop (WSL 2 engine) running and an NVIDIA GPU. The input is copied to a temporary folder
-on the local disk (Docker cannot always read OneDrive files); the result is copied to --out and the
-temporary folder is deleted, so nothing is left outside the project. Docker's full output goes to --log.
+on the local disk (Docker cannot always read OneDrive files) and the temporary folder is deleted at the end.
+Docker's full output goes to --log.
+
+The result (--out) has exactly the input's points, in the same order and with all their attributes, plus
+SegmentAnyTree's fields (PredInstance_SAT = tree ID, PredSemantic_SAT): SegmentAnyTree's own output can hold
+a few more points (repeated where its tiles overlap), so its IDs are mapped onto the input by nearest point.
+If --out already exists with another number of points (an older run), it is only re-mapped, Docker is not run.
 """
 import argparse, shutil, subprocess, sys, tempfile, time
 from pathlib import Path
@@ -41,13 +47,43 @@ def check_docker(docker, image):
              "uses the WSL 2 engine (Settings > General).\n" + r.stderr[-1500:])
 
 
-def point_count(path):
+def header_info(path):
+    """(point count, extra dimension names) or (None, []) if the file cannot be read."""
     try:
         import laspy
         with laspy.open(path) as f:
-            return f.header.point_count
+            return f.header.point_count, list(f.header.point_format.extra_dimension_names)
     except Exception:
-        return None
+        return None, []
+
+
+def remap_to_input(src, result, out):
+    """Write `out` = the points of `src` (same order, all attributes kept) + SegmentAnyTree's fields, each
+    point taking the values of the nearest point of `result` (within 0.5 m, else 0 = not a tree)."""
+    import numpy as np, laspy
+    from scipy.spatial import cKDTree
+    A, R = laspy.read(str(src)), laspy.read(str(result))
+    rdims = list(R.point_format.extra_dimension_names)
+    fields = [f for f in rdims if "instance" in f.lower() or "semantic" in f.lower()]
+    if not any("instance" in f.lower() for f in fields):
+        fail(f"no instance field in the SegmentAnyTree output {result}: {rdims}")
+    vals = {f: np.asarray(R[f]).astype(np.int64) for f in fields}
+    d, i = cKDTree(np.c_[R.x, R.y, R.z]).query(np.c_[A.x, A.y, A.z], distance_upper_bound=0.5, workers=-1)
+    ok = np.isfinite(d); i[~ok] = 0
+    n_res = len(R.x); del R
+    new = [f for f in fields if f not in A.point_format.extra_dimension_names]
+    if new:
+        A.add_extra_dims([laspy.ExtraBytesParams(name=f, type=np.int32) for f in new])
+    for f in fields:
+        A[f] = np.where(ok, vals[f][i], 0).astype(np.int32)
+    out = Path(out); out.parent.mkdir(parents=True, exist_ok=True)
+    part = out.with_name(out.name + ".part")          # never leave a half-written result under the real name
+    with open(part, "wb") as fh:                      # a path ending in .part would be written uncompressed
+        A.write(fh, do_compress=out.suffix.lower() == ".laz")
+    part.replace(out)
+    exact = float((d[ok] < 0.01).mean()) if ok.any() else 0.0
+    print(f"  {n_res:,} SegmentAnyTree points mapped onto the {len(A.x):,} input points: {ok.mean():.2%} matched, "
+          f"{exact:.2%} at the same position; fields {', '.join(fields)}", flush=True)
 
 
 def main():
@@ -61,10 +97,22 @@ def main():
     log_path = Path(a.log) if a.log else out.with_suffix(".log")
     if not src.exists():
         fail(f"input not found: {src}")
+    n_in, _ = header_info(src)
+
+    # an older run whose result does not have the input's points: map it, no need to run Docker again
+    if out.exists():
+        n_out, dims = header_info(out)
+        if n_out and n_in and n_out != n_in and any("instance" in x.lower() for x in dims):
+            print(f"{out.name} exists ({n_out:,} points, input {n_in:,}): mapping it onto the input points, "
+                  "SegmentAnyTree is not run again.", flush=True)
+            tmp = out.with_name(out.stem + "_docker_output" + out.suffix)
+            out.replace(tmp)
+            remap_to_input(src, tmp, out)
+            tmp.unlink()
+            return
+
     docker = shutil.which("docker")
     check_docker(docker, a.image)
-
-    n_in = point_count(src)
     print(f"SegmentAnyTree on {src.name}" + (f" ({n_in:,} points)" if n_in else "") + ". Docker output also goes to "
           f"{log_path}", flush=True)
     t0 = time.time()
@@ -88,21 +136,14 @@ def main():
         if rc != 0:
             fail(f"Docker run failed (exit code {rc}). Last lines are above; full output in {log_path}.\n"
                  "If it says 'CUDA out of memory', the file is too big for the GPU: run the plots one by one with "
-                 "benchmark_folder.py --models segmentanytree instead.")
+                 "benchmark_folder.py --models segmentanytree, or crop the file.")
         res = sorted((outd / "03_output_SAT" / "final_results").glob("*.la[sz]")) or \
               sorted(f for f in outd.rglob("*.la[sz]") if f.name != inp.name)
         if not res:
             fail(f"Docker finished but produced no LAS/LAZ. Full output in {log_path}.")
-        out.parent.mkdir(parents=True, exist_ok=True)
-        part = out.with_name(out.name + ".part")          # never leave a half-copied result under the real name
-        shutil.copy(res[0], part)
-        part.replace(out)
-    n_out = point_count(out)
-    mins = (time.time() - t0) / 60
-    print(f"\nSegmentAnyTree done in {mins:.1f} min -> {out}" + (f" ({n_out:,} points)" if n_out else ""), flush=True)
-    if n_in and n_out and n_in != n_out:
-        print(f"WARNING: the result has {n_out:,} points, the input {n_in:,}. The benchmark needs the same points; "
-              "send this window to Ryan.")
+        print(f"\nSegmentAnyTree done in {(time.time() - t0) / 60:.1f} min. Writing {out} ...", flush=True)
+        remap_to_input(src, res[0], out)
+    print(f"Done -> {out}", flush=True)
 
 
 if __name__ == "__main__":

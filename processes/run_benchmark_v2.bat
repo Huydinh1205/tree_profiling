@@ -2,10 +2,11 @@
 setlocal
 cd /d "%~dp0"
 title Tree segmentation benchmark
-REM Benchmark on labelled data. One report PER DATASET:
-REM   FOR-instanceV2   -> results\benchmark_v2_100\report.html
-REM   Synthetic Forest -> results\benchmark_syn_100\report.html
-REM   CedarCypress3D   -> results\benchmark_ced_100\report.html
+REM Benchmark on labelled data. One report PER DATASET and PER DENSITY:
+REM   FOR-instanceV2   -> results\benchmark_v2_full\report.html   (original density; _100 = thinned to 100 pts/m2)
+REM   Synthetic Forest -> results\benchmark_syn_full\report.html
+REM   CedarCypress3D   -> results\benchmark_ced_full\report.html
+REM Each density has its own plots (plots_full / plots_100) and mosaics (mosaic_*_full / mosaic_*_100).
 REM Run 1: prepares the data, makes one file per dataset for SegmentAnyTree on usegalaxy.eu, runs the classical models here.
 REM Run 2 (same choices, after you put the Galaxy results in the mosaic folders): adds SegmentAnyTree to the reports.
 REM Or, with Docker Desktop + the NVIDIA GPU on this computer: model choice S (SegmentAnyTree only) or A (all) runs
@@ -52,6 +53,18 @@ echo Unknown choice. Type 1, 2, 3 or press Enter.
 goto failed
 :sel_ok
 echo.
+echo Point density?
+echo   Enter = original density of each dataset, nothing thinned (slower; Synthetic Forest is very big)
+echo   1     = thinned to 100 pts/m2 like our cloud0 (the earlier runs)
+set "DENS="
+set /p "DENS=Choice: "
+set "DTAG=full"
+set "DARG="
+set "DLABEL=original density"
+if "%DENS%"=="1" set "DTAG=100"
+if "%DENS%"=="1" set "DARG=--density 100"
+if "%DENS%"=="1" set "DLABEL=100 pts/m2"
+echo.
 echo Which models?
 echo   Enter = 3 classical models (CHM watershed, Dalponte, li2012; li2012 is slow)
 echo   F     = fast: CHM watershed + Dalponte only
@@ -67,6 +80,11 @@ if /i "%MODE%"=="F" set "MODELS=chm_watershed dalponte_py"
 if /i "%MODE%"=="S" set "MODELS="
 if /i "%MODE%"=="S" set "RUNSAT=1"
 if /i "%MODE%"=="A" set "RUNSAT=1"
+if not "%DTAG%"=="full" goto models_ok
+if not "%MODELS%"=="chm_watershed dalponte_py li2012_py" goto models_ok
+echo   li2012 is left out at original density: on these point counts it would take days.
+set "MODELS=chm_watershed dalponte_py"
+:models_ok
 set "MLABEL=%MODELS%"
 if not defined MODELS set "MLABEL=SegmentAnyTree scoring only"
 
@@ -118,23 +136,23 @@ REM =============================== subroutines ===============================
 REM sets NAME, PLOTS, MOS, OUT, TITLE for dataset %1 (v2, syn or ced)
 if /i "%~1"=="v2" (
   set "NAME=FOR-instanceV2"
-  set "PLOTS=%V2%\plots_100"
-  set "MOS=..\data\mosaic_v2_100"
-  set "OUT=results\benchmark_v2_100"
+  set "PLOTS=%V2%\plots_%DTAG%"
+  set "MOS=..\data\mosaic_v2_%DTAG%"
+  set "OUT=results\benchmark_v2_%DTAG%"
 )
 if /i "%~1"=="syn" (
   set "NAME=Synthetic Forest"
-  set "PLOTS=%SYN%\plots_100"
-  set "MOS=..\data\mosaic_syn_100"
-  set "OUT=results\benchmark_syn_100"
+  set "PLOTS=%SYN%\plots_%DTAG%"
+  set "MOS=..\data\mosaic_syn_%DTAG%"
+  set "OUT=results\benchmark_syn_%DTAG%"
 )
 if /i "%~1"=="ced" (
   set "NAME=CedarCypress3D"
-  set "PLOTS=%CED%\plots_100"
-  set "MOS=..\data\mosaic_ced_100"
-  set "OUT=results\benchmark_ced_100"
+  set "PLOTS=%CED%\plots_%DTAG%"
+  set "MOS=..\data\mosaic_ced_%DTAG%"
+  set "OUT=results\benchmark_ced_%DTAG%"
 )
-set "TITLE=Tree segmentation evaluation: %NAME% at 100 pts/m2"
+set "TITLE=Tree segmentation evaluation: %NAME% at %DLABEL%"
 exit /b 0
 
 :mosaic
@@ -228,7 +246,7 @@ move /y "%~1.part" "%~1" >nul || exit /b 1
 exit /b 0
 
 :prep_v2
-if exist "%V2%\plots_100\*.las" exit /b 0
+if exist "%V2%\plots_%DTAG%\*.las" exit /b 0
 if exist "%V2%\test_data\*.ply" goto v2_unzipped
 if exist "%V2%\test_data.zip" goto v2_unzip
 echo Downloading the FOR-instanceV2 test plots (0.4 GB)...
@@ -238,25 +256,25 @@ call :download "%V2%\test_data.zip" "https://zenodo.org/api/records/16742708/fil
 echo Unzipping...
 powershell -NoProfile -Command "Expand-Archive -Force '%V2%\test_data.zip' '%V2%'" || exit /b 1
 :v2_unzipped
-echo Preparing 29 labelled plots at 100 pts/m2...
-%PY% prep_labelled.py "%V2%\test_data\*.ply" --out "%V2%\plots_100" --density 100 || exit /b 1
+echo Preparing 29 labelled plots at %DLABEL%...
+%PY% prep_labelled.py "%V2%\test_data\*.ply" --out "%V2%\plots_%DTAG%" %DARG% || exit /b 1
 exit /b 0
 
 :prep_syn
-if exist "%SYN%\plots_100\*.las" exit /b 0
+if exist "%SYN%\plots_%DTAG%\*.las" exit /b 0
 mkdir "%SYN%" 2>nul
 echo Synthetic Forest: 3 scenes of about 3 GB each (skipped when already complete)...
 call :download "%SYN%\WoodLand.pcd" "https://zenodo.org/api/records/17568131/files/WoodLand.pcd/content" 2519321570 || exit /b 1
 call :download "%SYN%\OpenForest.pcd" "https://zenodo.org/api/records/17568131/files/OpenForest.pcd/content" 2859047883 || exit /b 1
 call :download "%SYN%\ClosedForest.pcd" "https://zenodo.org/api/records/17568131/files/ClosedForest.pcd/content" 3180388832 || exit /b 1
-echo Preparing the 3 synthetic scenes at 100 pts/m2 (40 million lines each, a few minutes per scene)...
-%PY% prep_labelled.py "%SYN%\*.pcd" --out "%SYN%\plots_100" --density 100 || exit /b 1
+echo Preparing the 3 synthetic scenes at %DLABEL% (40 million lines each, a few minutes per scene)...
+%PY% prep_labelled.py "%SYN%\*.pcd" --out "%SYN%\plots_%DTAG%" %DARG% || exit /b 1
 exit /b 0
 
 :prep_ced
 REM rgb_kept.txt marks plots prepared with their true colour (since 29/10/2026); older ones are prepared again
 REM (same points, so finished model runs and Galaxy results stay valid).
-if exist "%CED%\plots_100\rgb_kept.txt" exit /b 0
+if exist "%CED%\plots_%DTAG%\rgb_kept.txt" exit /b 0
 if exist "%CED%\Kokonoe\plot_1\Kokonoe_ULS_plot-1.las" goto ced_unzipped
 if exist "%CED%\CedarCypress3D_data.zip" goto ced_unzip
 echo Downloading CedarCypress3D (3 GB)...
@@ -266,7 +284,7 @@ call :download "%CED%\CedarCypress3D_data.zip" "https://zenodo.org/api/records/2
 echo Unzipping the drone point clouds and field data (the terrestrial scans and photos are skipped)...
 %PY% -c "import sys, zipfile; z = zipfile.ZipFile(sys.argv[1]); [z.extract(n, sys.argv[2]) for n in z.namelist() if '_ULS_' in n or n.endswith(('.csv', '.xlsx', 'README.txt'))]" "%CED%\CedarCypress3D_data.zip" "%CED%" || exit /b 1
 :ced_unzipped
-echo Preparing 34 labelled plots at 100 pts/m2...
-%PY% prep_labelled.py "%CED%\*\plot_*\*_ULS_*.las" --out "%CED%\plots_100" --density 100 || exit /b 1
-echo prepared with true colour > "%CED%\plots_100\rgb_kept.txt"
+echo Preparing 34 labelled plots at %DLABEL%...
+%PY% prep_labelled.py "%CED%\*\plot_*\*_ULS_*.las" --out "%CED%\plots_%DTAG%" %DARG% || exit /b 1
+echo prepared with true colour > "%CED%\plots_%DTAG%\rgb_kept.txt"
 exit /b 0
