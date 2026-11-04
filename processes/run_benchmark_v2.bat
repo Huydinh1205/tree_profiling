@@ -10,6 +10,8 @@ REM Run 1: prepares the data, makes one file per dataset for SegmentAnyTree on u
 REM Run 2 (same choices, after you put the Galaxy results in the mosaic folders): adds SegmentAnyTree to the reports.
 REM Or, with Docker Desktop + the NVIDIA GPU on this computer: model choice S (SegmentAnyTree only) or A (all) runs
 REM SegmentAnyTree here (sat_docker.py) on each mosaic, so Galaxy is not needed. Results go to the same folders.
+REM Every SegmentAnyTree result (Docker or Galaxy) is also merged with merge_sat.py (broad crowns cut into pieces are
+REM joined again); the report scores both: "SegmentAnyTree v1" (raw) and "SegmentAnyTree v1 + merge_sat".
 
 REM ---- Python 3.10 (the company Python, no venv) ----
 set "PY="
@@ -55,6 +57,7 @@ echo   Enter = 3 classical models (CHM watershed, Dalponte, li2012; li2012 is sl
 echo   F     = fast: CHM watershed + Dalponte only
 echo   S     = SegmentAnyTree only, run with Docker on this computer (open Docker Desktop first)
 echo   A     = all: the 3 classical models + SegmentAnyTree with Docker
+echo   (every SegmentAnyTree result is also merged with merge_sat.py; the report shows raw and merged)
 echo   (plots, models and SegmentAnyTree results already done are skipped, so a second run only adds what is new)
 set "MODE="
 set /p "MODE=Choice: "
@@ -160,22 +163,33 @@ exit /b 0
 
 :run
 call :vars %1
-set "EXTRA="
-%PY% mosaic_labelled.py find "%MOS%\index.csv" --search "%MOS%" --out "%MOS%\sat_result.laz" >nul 2>&1
-if errorlevel 1 goto run_models
-%PY% mosaic_labelled.py split "%MOS%\index.csv" "%MOS%\sat_result.laz" --out "%MOS%\sat_by_plot" >nul || exit /b 1
-set "EXTRA=--external sat=%MOS%\sat_by_plot"
+call :satextra || exit /b 1
 :run_models
 echo.
 echo ===== %NAME%: running %MLABEL% ... results go to %CD%\%OUT%
 %PY% benchmark_folder.py "%PLOTS%" --out "%OUT%" --models %MODELS% %EXTRA% --title "%TITLE%" || exit /b 1
 if defined EXTRA exit /b 0
 REM Galaxy finished while the models were running? Add it now.
+call :satextra || exit /b 1
+if not defined EXTRA exit /b 0
+echo   %NAME%: SegmentAnyTree result found, adding it to the report...
+%PY% benchmark_folder.py "%PLOTS%" --out "%OUT%" --models %MODELS% %EXTRA% --title "%TITLE%" || exit /b 1
+exit /b 0
+
+:satextra
+REM If the mosaic has a SegmentAnyTree result: split it per plot (sat), merge its over-segmented pieces with
+REM merge_sat.py (again only when the result is newer than the merged file) and split that too (sat_merged).
+REM Sets EXTRA for benchmark_folder.py; EXTRA stays empty when there is no result yet.
+set "EXTRA="
 %PY% mosaic_labelled.py find "%MOS%\index.csv" --search "%MOS%" --out "%MOS%\sat_result.laz" >nul 2>&1
 if errorlevel 1 exit /b 0
-echo   %NAME%: SegmentAnyTree result found, adding it to the report...
 %PY% mosaic_labelled.py split "%MOS%\index.csv" "%MOS%\sat_result.laz" --out "%MOS%\sat_by_plot" >nul || exit /b 1
-%PY% benchmark_folder.py "%PLOTS%" --out "%OUT%" --models %MODELS% --external sat=%MOS%\sat_by_plot --title "%TITLE%" || exit /b 1
+%PY% -c "import os, sys; a, b = sys.argv[1:]; sys.exit(0 if os.path.exists(b) and os.path.getmtime(b) >= os.path.getmtime(a) else 1)" "%MOS%\sat_result.laz" "%MOS%\sat_result_merged.laz" && goto satextra_split
+echo   %NAME%: merging over-segmented SegmentAnyTree trees (merge_sat.py)...
+%PY% merge_sat.py "%MOS%\sat_result.laz" || exit /b 1
+:satextra_split
+%PY% mosaic_labelled.py split "%MOS%\index.csv" "%MOS%\sat_result_merged.laz" --out "%MOS%\sat_merged_by_plot" >nul || exit /b 1
+set "EXTRA=--external sat=%MOS%\sat_by_plot sat_merged=%MOS%\sat_merged_by_plot"
 exit /b 0
 
 :show

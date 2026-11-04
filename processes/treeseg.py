@@ -403,7 +403,9 @@ def model_label(m):
     if m in MODELS: return MODELS[m]["label"]
     n = m.split(":", 1)[-1]
     n = n[len("external_"):] if n.startswith("external_") else n
-    return "SegmentAnyTree v1 (external)" if n.lower() in ("sat", "segmentanytree") else n
+    if n.lower() in ("sat", "segmentanytree"): return "SegmentAnyTree v1 (external)"
+    if n.lower() == "sat_merged": return "SegmentAnyTree v1 + merge_sat"
+    return n
 
 
 def relabel(ids):

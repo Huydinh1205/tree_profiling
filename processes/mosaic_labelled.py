@@ -108,7 +108,8 @@ def find(a):
                 dims = list(r.header.point_format.extra_dimension_names)
         except Exception:
             continue
-        if n == total and any("instance" in x.lower() or "treeid" in x.lower() for x in dims) and "mosaic_labelled" not in f.name:
+        if n == total and any("instance" in x.lower() or "treeid" in x.lower() for x in dims) and "mosaic_labelled" not in f.name \
+                and "_merged" not in f.name and "_colour" not in f.name:
             found.append(f)
     if not found:
         print(f"No result with {total:,} points found in: {', '.join(a.search)}"); raise SystemExit(1)
