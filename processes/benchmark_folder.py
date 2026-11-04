@@ -59,8 +59,9 @@ def main():
             res = Path(folder) / f"{f.stem}.laz"
             if not res.exists():
                 print(f"{tag}: no {name} result ({res}), skipped"); continue
-            if (dst / "predictions" / f"external_{name}.npy").exists() and not a.redo:
-                continue
+            npy = dst / "predictions" / f"external_{name}.npy"
+            if npy.exists() and not a.redo and npy.stat().st_mtime >= res.stat().st_mtime:
+                continue                      # already scored, and the result has not changed since
             print(f"{tag}: scoring {name} ...", flush=True)
             rc = run([py, str(here / "process1_benchmark.py"), str(f), "--out", str(dst), "--models",
                       "--external", f"{name}={res}", "--append"], log)

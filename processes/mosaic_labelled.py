@@ -71,12 +71,18 @@ def build(a):
 
 def split(a):
     rows = list(csv.DictReader(open(a.index)))
+    out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
+    # only (re)write plots whose file is older than the result, so a new result is scored again and an
+    # unchanged one is not (benchmark_folder.py re-scores a plot when its file is newer than the score)
+    t_res = Path(a.result).stat().st_mtime
+    rows = [r for r in rows if not ((out / f"{r['plot']}.laz").exists() and (out / f"{r['plot']}.laz").stat().st_mtime >= t_res)]
+    if not rows:
+        print(f"{out}: all plots up to date"); return
     L = laspy.read(a.result)
     names = list(L.point_format.extra_dimension_names) + list(L.point_format.dimension_names)
     field = a.field or next((f for f in ["PredInstance_SAT", "PredInstance", "treeID", "instance"] if f in names), None)
     if field is None: raise SystemExit(f"no tree ID field in {a.result}: {names}")
     x, y, z = np.asarray(L.x), np.asarray(L.y), np.asarray(L.z); ids = np.asarray(L[field]).astype(np.int64)
-    out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
     for r in rows:
         m = ((x >= float(r["xmin"]) - 0.5) & (x <= float(r["xmax"]) + 0.5) & (y >= float(r["ymin"]) - 0.5) & (y <= float(r["ymax"]) + 0.5))
         hdr = laspy.LasHeader(point_format=6, version="1.4")
