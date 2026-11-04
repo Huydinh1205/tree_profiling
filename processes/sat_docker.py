@@ -141,7 +141,8 @@ def main():
         inner = (f"mkdir -p /work && python3.8 /src/run.py --dataset-path /in/input{ext} --output-dir /work "
                  f"--log-file false && mkdir -p /result/final && "
                  f"cp /work/03_output_SAT/final_results/*.la[sz] /result/final/")
-        cmd = [docker, "run", "--rm", "--gpus", "all",
+        # --shm-size: Docker's default 64 MB of shared memory makes PyTorch crash (segfault) on big clouds
+        cmd = [docker, "run", "--rm", "--gpus", "all", "--shm-size", "16g",
                "-v", f"{inp}:/in/input{ext}:ro", "-v", f"{outd}:/result", a.image, "bash", "-c", inner]
         with open(log_path, "w", encoding="utf-8") as log:
             log.write("$ " + " ".join(cmd) + "\n")
