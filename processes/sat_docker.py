@@ -57,6 +57,19 @@ def header_info(path):
         return None, []
 
 
+def write_xyz(src, dst):
+    """Copy of `src` with x, y, z only. SegmentAnyTree adds its own PredInstance_SAT / PredSemantic_SAT fields
+    and crashes when the input already has them (e.g. a Galaxy result); every original attribute comes back
+    anyway in remap_to_input, which writes the input's own points."""
+    import laspy
+    L = laspy.read(str(src))
+    h = laspy.LasHeader(point_format=6, version="1.4")
+    h.offsets, h.scales = L.header.offsets, L.header.scales
+    W = laspy.LasData(h); W.x, W.y, W.z = L.x, L.y, L.z
+    with open(dst, "wb") as fh:
+        W.write(fh, do_compress=True)
+
+
 def remap_to_input(src, result, out):
     """Write `out` = the points of `src` (same order, all attributes kept) + SegmentAnyTree's fields, each
     point taking the values of the nearest point of `result` (within 0.5 m, else 0 = not a tree)."""
@@ -118,10 +131,10 @@ def main():
     t0 = time.time()
     with tempfile.TemporaryDirectory(prefix="sat_", ignore_cleanup_errors=True) as td:
         td = Path(td)
-        ext = src.suffix.lower() if src.suffix.lower() in (".laz", ".las") else ".laz"
-        inp = td / f"input{ext}"
+        ext = ".laz"
+        inp = td / "input.laz"
         outd = td / "out"; outd.mkdir()
-        shutil.copy(src, inp)
+        write_xyz(src, inp)                           # x, y, z only (see write_xyz)
         # SegmentAnyTree works in /work INSIDE the container (Docker's own Linux disk) and only the final
         # LAS/LAZ is copied out to /result. Working directly on the Windows folder (through WSL) is slow and
         # can fail with "No such file or directory" when the pipeline deletes and re-creates its folders.
