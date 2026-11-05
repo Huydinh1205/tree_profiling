@@ -100,6 +100,28 @@ On the company machine (no R, no Docker) run the three Python models:
 
 The first run of `dalponte_py` / `li2012_py` takes ~10 s extra to compile.
 
+### Click a tree in CloudCompare to see its numbers (`tree_info.py`)
+
+Drag any segmentation result onto `tree_info.bat` (SegmentAnyTree result, the Galaxy "Processed Files" .zip,
+`points_treeid.laz` from process 2, a `*_colour.laz`). Next to it you get:
+
+- `<name>_info.laz`: each tree in its own colour; every point carries its tree's numbers as scalar fields:
+  `TreeID, Height_m, Crown_diameter_m, Crown_width_max_m, Crown_area_m2, Crown_volume_m3, Foliage_volume_m3,
+  Crown_base_m, Crown_depth_m, Canopy_density_pct, Nearest_tree_m, N_points, QC_flag`, plus empty fields
+  kept for later (`Species_code, Species_prob, Foliage_condition, Thermal_anomaly, Confidence, Koala_value`, NaN for now).
+  Ground and unassigned points: `TreeID` 0, numbers NaN.
+- `<name>_trees.csv`: one row per tree (tree_uid, tree-top x/y/z and the same numbers).
+- `<name>_crowns.shp`: crown outlines at the tree-top height (trees fully under another crown have none).
+
+In CloudCompare: open `<name>_info.laz` (keep the extra fields ticked), Tools > Point picking (or the "i" icon),
+click a tree. The label title shows the displayed scalar field; expand the label (click it) to see all fields.
+To map a number, Properties > Colors > Scalar field, then pick e.g. `Height_m` or `Crown_volume_m3`.
+`QC_flag`: 0 ok, 1 fewer than 20 points, 2 tree top within 2 m of the data edge, 3 both.
+
+```powershell
+py -3.10 tree_info.py sat_result.laz --site COLLINS      # tree_uid = COLLINS_TREE00042
+```
+
 ## 3. Process 1: score models on labelled data
 
 ```powershell
