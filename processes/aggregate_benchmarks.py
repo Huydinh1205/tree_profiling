@@ -15,6 +15,18 @@ from pathlib import Path
 import numpy as np
 import treeseg as T
 
+
+def read_rows(path):
+    """Rows of a csv, or [] (with a warning) when the file is damaged, e.g. full of NUL bytes after a power cut."""
+    try:
+        data = Path(path).read_bytes()
+        if b"\x00" in data:
+            raise ValueError("NUL bytes (written while the computer turned off?)")
+        return list(csv.DictReader(data.decode("utf-8", errors="replace").splitlines()))
+    except Exception as e:
+        print(f"WARNING: skipped damaged file {path}: {e}. Run benchmark_folder.py / the .bat again to make it again.")
+        return []
+
 REGION_INFO = {
     "RMIT": "Australia, dry eucalypt forest (Riegl miniVUX ULS)",
     "CULS": "Czechia, conifer plantation (ULS)",
@@ -201,7 +213,7 @@ def main():
         d = Path(d); f = d / "scores_all_runs.csv"
         if not f.exists(): continue
         region = region_of(d.name)
-        for r in csv.DictReader(open(f)):
+        for r in read_rows(f):
             if r["protocol"] != "benchmark" or r["shift"] != "0,0": continue
             m = T.model_label(r["model"])
             for key in [(m, region), (m, G_ALL), (m, group_of(region))]:
@@ -211,12 +223,12 @@ def main():
                               matched=int(r["matched"]), f1=float(r["f1"]), det_f1=float(r["det_f1"]), seconds=float(r["seconds"])))
         e = d / "errors" / "summary.csv"
         if e.exists():
-            for r in csv.DictReader(open(e)):
+            for r in read_rows(e):
                 m = T.model_label(r["model"]) if r["model"] in T.MODELS else r["model"]
                 for k in ERR: err[m][k] += int(r[f"ref_{k}"])
             for ef in (d / "errors").glob("errors_*.csv"):
                 m = T.model_label(ef.stem[len("errors_"):])
-                for r in csv.DictReader(open(ef)):
+                for r in read_rows(ef):
                     if int(r["overtopped"]):
                         err_over[m][0] += r["status"] == "ok"; err_over[m][1] += 1
     if not plots: raise SystemExit("No results found")

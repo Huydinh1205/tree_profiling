@@ -76,7 +76,15 @@ def split(a):
     # only (re)write plots whose file is older than the result, so a new result is scored again and an
     # unchanged one is not (benchmark_folder.py re-scores a plot when its file is newer than the score)
     t_res = Path(a.result).stat().st_mtime
-    rows = [r for r in rows if not ((out / f"{r['plot']}.laz").exists() and (out / f"{r['plot']}.laz").stat().st_mtime >= t_res)]
+    def ok(p):                                        # exists, newer than the result, and readable (not damaged)
+        if not (p.exists() and p.stat().st_mtime >= t_res):
+            return False
+        try:
+            with laspy.open(p) as f:
+                return f.header.point_count > 0
+        except Exception:
+            return False
+    rows = [r for r in rows if not ok(out / f"{r['plot']}.laz")]
     if not rows:
         print(f"{out}: all plots up to date"); return
     L = laspy.read(a.result)

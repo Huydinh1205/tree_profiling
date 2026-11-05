@@ -27,6 +27,49 @@ def run(cmd, log):
         return subprocess.run(cmd, stdout=fh, stderr=subprocess.STDOUT).returncode
 
 
+def broken(p):
+    """True for a file left half-written by a crash or a power cut: empty, full of NUL bytes (what Windows leaves
+    when it turns off while a file is written), or a .npy / .las / .laz that cannot be opened."""
+    try:
+        if p.stat().st_size == 0:
+            return True
+        if p.suffix.lower() == ".csv":
+            return b"\x00" in p.read_bytes()
+        if p.suffix.lower() == ".npy":
+            import numpy as np
+            np.load(p, mmap_mode="r"); return False
+        if p.suffix.lower() in (".las", ".laz"):
+            import laspy
+            with laspy.open(p) as f:
+                f.header.point_count
+            return False
+    except Exception:
+        return True
+    return False
+
+
+def set_aside(p):
+    """Rename a broken file to <name>.broken (replacing an older one), so it is made again."""
+    p.replace(p.with_name(p.name + ".broken"))
+
+
+def check_plot(dst, tag):
+    """Set aside the broken result files of one plot (process 1 scores and predictions, process 3 errors).
+    Returns (scores lost, a classical model's predictions lost)."""
+    files = [dst / "scores_all_runs.csv", dst / "scores_summary.csv"] + sorted(dst.glob("predictions/*.npy")) \
+        + sorted(dst.glob("errors/*.csv"))
+    bad = [p for p in files if p.exists() and broken(p)]
+    for p in bad:
+        print(f"{tag}: {p.relative_to(dst)} is damaged (computer turned off while it was written?), it is made again")
+        set_aside(p)
+    summ = dst / "errors" / "summary.csv"
+    if bad and summ.exists():
+        set_aside(summ)                               # run process 3 again for this plot
+    scores_lost = any(p.name == "scores_all_runs.csv" for p in bad)
+    model_lost = any(p.parent.name == "predictions" and not p.stem.startswith("external_") for p in bad)
+    return scores_lost, model_lost
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("folders", nargs="+", help="folder(s) with labelled .las files (from prep_labelled.py)")
@@ -47,8 +90,12 @@ def main():
     for i, f in enumerate(files, 1):
         dst = out / f.stem; log = out / f"{f.stem}.log"; changed = False
         tag = f"[{i}/{len(files)}] {f.stem}"
+        scores_lost, model_lost = check_plot(dst, tag) if dst.is_dir() else (False, False)
         done = (dst / "scores_all_runs.csv").exists()
-        if a.models and (a.redo or not done):
+        if (scores_lost or model_lost) and not a.models:
+            print(f"{tag}: the classical models' results of this plot were damaged; run the .bat again with the "
+                  "classical models (Enter or A) to redo them")
+        if a.models and (a.redo or not done or model_lost):
             print(f"{tag}: models {' '.join(a.models)} ...", flush=True)
             rc = run([py, str(here / "process1_benchmark.py"), str(f), "--out", str(dst), "--models", *a.models,
                       "--shifts", str(a.shifts), "--allow-slow"] + (["--append"] if done else []), log)
@@ -59,6 +106,9 @@ def main():
             res = Path(folder) / f"{f.stem}.laz"
             if not res.exists():
                 print(f"{tag}: no {name} result ({res}), skipped"); continue
+            if broken(res):
+                set_aside(res)
+                print(f"{tag}: {name} result {res} is damaged, set aside; run the .bat again to make it again"); continue
             npy = dst / "predictions" / f"external_{name}.npy"
             if npy.exists() and not a.redo and npy.stat().st_mtime >= res.stat().st_mtime:
                 continue                      # already scored, and the result has not changed since
