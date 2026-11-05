@@ -20,6 +20,11 @@ whole plots, each group at most --max-points points (default 20 million), one Do
 group's result is kept in <out name>_parts so a run that stops half way resumes at the next group; the
 groups are then put back together in the input's point order, with tree IDs made unique across groups.
 Plots are 30 m apart in the mosaic, so no tree is cut between groups.
+If SegmentAnyTree crashes on a group (e.g. "Segmentation fault" in eval.py on the dense Saiki plots of
+CedarCypress3D), that group's plots are run one at a time; a plot that still crashes is tried again thinned to
+one point per --thin voxel (5 cm, then 10 cm), and its tree IDs are mapped back onto ALL its points by nearest
+point. A plot that fails every try is listed at the end (the run stops without writing --out; finished plots
+are kept, so the next run only retries the failed ones).
   py -3.10 sat_docker.py ..\\data\\mosaic_ced_full\\mosaic_unlabelled.laz --out ..\\data\\mosaic_ced_full\\sat_result.laz
       --index ..\\data\\mosaic_ced_full\\index.csv
 """
@@ -28,6 +33,11 @@ from pathlib import Path
 
 IMAGE = "ghcr.io/3dtrees-earth/3dtrees_sat:1.1.0"   # same image as treeseg.run_segmentanytree
 MAX_POINTS = 20_000_000
+THIN = (0.05, 0.10)                                 # voxel sizes (m) tried on a single plot that keeps crashing
+
+
+class SatFailed(Exception):
+    """SegmentAnyTree ran but gave no result (crash, out of memory...)."""
 
 
 def fail(msg):
@@ -152,17 +162,20 @@ def run_docker(docker, image, inp, td, log, label=""):
     cmd = [docker, "run", "--rm", "--gpus", "all", "--shm-size", "16g",
            "-v", f"{inp}:/in/input.laz:ro", "-v", f"{outd}:/result", image, "bash", "-c", inner]
     log.write((f"\n===== {label}\n" if label else "") + "$ " + " ".join(cmd) + "\n"); log.flush()
-    killed = oom_gpu = False
+    killed = oom_gpu = segv = False
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                          encoding="utf-8", errors="replace", bufsize=1)
     for line in p.stdout:
         print(line, end="", flush=True); log.write(line)
         killed |= "SIGKILL" in line or "TerminatedWorkerError" in line
         oom_gpu |= "CUDA out of memory" in line
+        segv |= "Segmentation fault" in line
     rc = p.wait(); log.flush()
     res = sorted((outd / "final").glob("*.la[sz]"))
     if rc != 0 or not res:
-        if killed:
+        if segv:
+            why = "SegmentAnyTree crashed (Segmentation fault)."
+        elif killed:
             why = ("OUT OF RAM: Windows/WSL killed SegmentAnyTree (SIGKILL) because the file is too big for the memory "
                    "Docker may use. Run again with a smaller --max-points (e.g. 10000000), or give WSL more memory: "
                    "in %USERPROFILE%\\.wslconfig write the two lines  [wsl2]  and  memory=24GB  (about 3/4 of this "
@@ -171,9 +184,17 @@ def run_docker(docker, image, inp, td, log, label=""):
             why = "CUDA out of memory = too big for the GPU: run again with a smaller --max-points (e.g. 10000000)."
         else:
             why = "Look for 'Traceback' or 'Error' in the lines above."
-        fail(f"SegmentAnyTree produced no result{' for ' + label if label else ''} (Docker exit code {rc}).\n"
-             f"{why}\nFull output in {log.name}.")
+        raise SatFailed(f"SegmentAnyTree produced no result{' for ' + label if label else ''} (Docker exit code {rc}).\n"
+                        f"{why}\nFull output in {log.name}.")
     return res[0]
+
+
+def voxel_keep(x, y, z, v):
+    """Indices of one point per v-metre voxel (the first one), in the original order."""
+    import numpy as np
+    k = np.floor(np.c_[x, y, z] / v).astype(np.int64)
+    _, first = np.unique(k, axis=0, return_index=True)
+    return np.sort(first)
 
 
 def plot_groups(index, x, y, max_points):
@@ -198,7 +219,7 @@ def plot_groups(index, x, y, max_points):
     return rows, plot, groups
 
 
-def run_grouped(docker, image, src, out, index, max_points, log_path):
+def run_grouped(docker, image, src, out, index, max_points, log_path, thin_steps=THIN):
     import numpy as np, laspy
     L = laspy.read(str(src))
     offsets, scales = L.header.offsets, L.header.scales
@@ -211,35 +232,82 @@ def run_grouped(docker, image, src, out, index, max_points, log_path):
     if loose:
         print(f"  ({loose:,} points are outside every plot box in {index}; they get tree ID 0)", flush=True)
     parts = out.with_name(out.stem + "_parts"); parts.mkdir(parents=True, exist_ok=True)
-    full, next_id = {}, 0
+
+    def part_of(ks):
+        return parts / f"plots_{ks[0] + 1:02d}-{ks[-1] + 1:02d}.laz"
+
+    def done(ks):
+        p = part_of(ks)
+        n_part, dims = header_info(p) if p.exists() else (None, [])
+        return n_part == int(np.isin(plot, ks).sum()) and any("instance" in d.lower() for d in dims)
+
+    def attempt(ks, label, log, thin=0.0):
+        """One Docker run on the plots ks (thinned to one point per `thin` m voxel if thin > 0); writes the part."""
+        sel = np.flatnonzero(np.isin(plot, ks))
+        keep = voxel_keep(x[sel], y[sel], z[sel], thin) if thin else np.arange(len(sel))
+        if thin:
+            label += f", thinned to one point per {thin * 100:.0f} cm: {len(keep):,} points"
+        print(f"\n--- {label}", flush=True)
+        t0 = time.time()
+        with tempfile.TemporaryDirectory(prefix="sat_", ignore_cleanup_errors=True) as td:
+            td = Path(td)
+            s = sel[keep]
+            write_points(td / "input.laz", x[s], y[s], z[s], offsets, scales)
+            res = run_docker(docker, image, td / "input.laz", td, log, label)
+            fields, msg = map_fields(x[sel], y[sel], z[sel], res)     # back onto ALL the points of these plots
+        write_points(part_of(ks), x[sel], y[sel], z[sel], offsets, scales, fields)
+        print(f"  {msg}\n  done in {(time.time() - t0) / 60:.1f} min -> {part_of(ks)}", flush=True)
+
+    def plot_name(k):
+        return f"plot {k + 1} ({rows[k]['plot']})"
+
+    covered, failed = [], []                          # covered: plot lists whose part file holds a result
     with open(log_path, "w", encoding="utf-8") as log:
         for g, ks in enumerate(groups, 1):
-            sel = np.flatnonzero(np.isin(plot, ks))
-            part = parts / f"plots_{ks[0] + 1:02d}-{ks[-1] + 1:02d}.laz"
-            label = f"group {g}/{len(groups)}: plots {ks[0] + 1} to {ks[-1] + 1} of {len(rows)}, {len(sel):,} points"
-            n_part, dims = header_info(part) if part.exists() else (None, [])
-            if n_part == len(sel) and any("instance" in d.lower() for d in dims):
-                print(f"\n--- {label}: already done ({part.name}), skipped", flush=True)
-            else:
-                print(f"\n--- {label}", flush=True)
-                t0 = time.time()
-                with tempfile.TemporaryDirectory(prefix="sat_", ignore_cleanup_errors=True) as td:
-                    td = Path(td)
-                    write_points(td / "input.laz", x[sel], y[sel], z[sel], offsets, scales)
-                    res = run_docker(docker, image, td / "input.laz", td, log, label)
-                    fields, msg = map_fields(x[sel], y[sel], z[sel], res)
-                write_points(part, x[sel], y[sel], z[sel], offsets, scales, fields)
-                print(f"  {msg}\n  group {g} done in {(time.time() - t0) / 60:.1f} min -> {part}", flush=True)
-            P = laspy.read(str(part))
-            group_max = 0
-            for f in P.point_format.extra_dimension_names:
-                v = np.asarray(P[f]).astype(np.int64)
-                if "instance" in f.lower():                # tree IDs restart at 1 in every group: make them unique
-                    v = np.where(v > 0, v + next_id, 0)
-                    group_max = int(v.max()) if len(v) else 0
-                full.setdefault(f, np.zeros(len(x), np.int32))[sel] = v.astype(np.int32)
-            next_id = max(next_id, group_max)
-            del P
+            n = int(np.isin(plot, ks).sum())
+            label = f"group {g}/{len(groups)}: plots {ks[0] + 1} to {ks[-1] + 1} of {len(rows)}, {n:,} points"
+            if done(ks):
+                print(f"\n--- {label}: already done ({part_of(ks).name}), skipped", flush=True)
+                covered.append(ks); continue
+            # a group that crashed before (some of its plots already have their own part): go plot by plot
+            if len(ks) == 1 or not any(done([k]) for k in ks):
+                try:
+                    attempt(ks, label, log); covered.append(ks); continue
+                except SatFailed as e:
+                    print(f"\n{e}", flush=True)
+                    if len(ks) > 1:
+                        print(f"  -> running the {len(ks)} plots of group {g} one at a time", flush=True)
+            for k in ks:
+                one = [k]
+                if done(one):
+                    if len(ks) > 1:
+                        print(f"\n--- {plot_name(k)}: already done ({part_of(one).name}), skipped", flush=True)
+                    covered.append(one); continue
+                n1 = int((plot == k).sum())
+                tries = ([0.0] if len(ks) > 1 else []) + list(thin_steps)
+                for thin in tries:
+                    try:
+                        attempt(one, f"{plot_name(k)}, {n1:,} points", log, thin); covered.append(one); break
+                    except SatFailed as e:
+                        print(f"\n{e}", flush=True)
+                else:
+                    failed.append(k)
+    if failed:
+        fail(f"SegmentAnyTree failed on {len(failed)} plot(s) even one at a time and thinned: "
+             + ", ".join(plot_name(k) for k in failed) + f".\nThe other plots are done and kept in {parts}; "
+             "running again only retries these. Send this window and the log to Ryan.")
+
+    full, next_id = {}, 0
+    for ks in covered:
+        P = laspy.read(str(part_of(ks)))
+        sel = np.flatnonzero(np.isin(plot, ks))
+        for f in P.point_format.extra_dimension_names:
+            v = np.asarray(P[f]).astype(np.int64)
+            if "instance" in f.lower():                # tree IDs restart at 1 in every part: make them unique
+                v = np.where(v > 0, v + next_id, 0)
+                next_id = max(next_id, int(v.max()) if len(v) else 0)
+            full.setdefault(f, np.zeros(len(x), np.int32))[sel] = v.astype(np.int32)
+        del P
     del x, y, z
     print(f"\nAll {len(groups)} groups done. Writing {out} ...", flush=True)
     write_with_fields(src, full, out)
@@ -257,6 +325,8 @@ def main():
                     "then runs in groups of whole plots")
     ap.add_argument("--max-points", type=int, default=MAX_POINTS, help="with --index: most points per Docker run "
                     f"(default {MAX_POINTS:,}; lower it if SegmentAnyTree is still killed or the GPU runs out)")
+    ap.add_argument("--thin", type=float, nargs="*", default=list(THIN), help="with --index: voxel sizes (m) tried, "
+                    "one after the other, on a single plot that keeps crashing (default 0.05 0.10; none = no thinning)")
     a = ap.parse_args()
     src, out = Path(a.input), Path(a.out)
     log_path = Path(a.log) if a.log else out.with_suffix(".log")
@@ -282,13 +352,16 @@ def main():
           f"{log_path}", flush=True)
     t0 = time.time()
     if a.index and n_in and a.max_points > 0 and n_in > a.max_points:
-        run_grouped(docker, a.image, src, out, Path(a.index), a.max_points, log_path)
+        run_grouped(docker, a.image, src, out, Path(a.index), a.max_points, log_path, a.thin)
     else:
         with tempfile.TemporaryDirectory(prefix="sat_", ignore_cleanup_errors=True) as td, \
                 open(log_path, "w", encoding="utf-8") as log:
             td = Path(td)
             write_xyz(src, td / "input.laz")          # x, y, z only (see write_xyz)
-            res = run_docker(docker, a.image, td / "input.laz", td, log)
+            try:
+                res = run_docker(docker, a.image, td / "input.laz", td, log)
+            except SatFailed as e:
+                fail(str(e))
             print(f"\nSegmentAnyTree done in {(time.time() - t0) / 60:.1f} min. Writing {out} ...", flush=True)
             remap_to_input(src, res, out)
     print(f"Done in {(time.time() - t0) / 60:.1f} min -> {out}", flush=True)
