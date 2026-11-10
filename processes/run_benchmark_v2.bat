@@ -199,13 +199,13 @@ exit /b 0
 
 :satextra
 REM If the mosaic has a SegmentAnyTree result: split it per plot (sat), merge its over-segmented pieces with
-REM merge_sat.py (again only when the result is newer than the merged file) and split that too (sat_merged).
+REM merge_sat.py (again when the result or merge_sat.py is newer than the merged file) and split that too (sat_merged).
 REM Sets EXTRA for benchmark_folder.py; EXTRA stays empty when there is no result yet.
 set "EXTRA="
 %PY% mosaic_labelled.py find "%MOS%\index.csv" --search "%MOS%" --out "%MOS%\sat_result.laz" >nul 2>&1
 if errorlevel 1 exit /b 0
 %PY% mosaic_labelled.py split "%MOS%\index.csv" "%MOS%\sat_result.laz" --out "%MOS%\sat_by_plot" >nul || exit /b 1
-%PY% -c "import os, sys; a, b = sys.argv[1:]; sys.exit(0 if os.path.exists(b) and os.path.getmtime(b) >= os.path.getmtime(a) else 1)" "%MOS%\sat_result.laz" "%MOS%\sat_result_merged.laz" && goto satextra_split
+%PY% -c "import os, sys; a, b, c = sys.argv[1:]; sys.exit(0 if os.path.exists(b) and os.path.getmtime(b) >= max(os.path.getmtime(a), os.path.getmtime(c)) else 1)" "%MOS%\sat_result.laz" "%MOS%\sat_result_merged.laz" merge_sat.py && goto satextra_split
 echo   %NAME%: merging over-segmented SegmentAnyTree trees (merge_sat.py)...
 %PY% merge_sat.py "%MOS%\sat_result.laz" || exit /b 1
 :satextra_split

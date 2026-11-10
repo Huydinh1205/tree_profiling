@@ -460,8 +460,12 @@ def tree_table(cloud: Cloud, ids, res=0.5, voxel=0.5):
         base = float(np.percentile(hb, 10)) if hb.size else 0.0
         cr = H >= base
         xyz = np.c_[X[cr], Y[cr], H[cr]]
+        hv = None                                             # crown hull corners (enough to test "inside")
         try:
-            vol = float(ConvexHull(xyz, qhull_options="QJ").volume) if len(xyz) >= 5 else 0.0
+            if len(xyz) >= 5:
+                ch = ConvexHull(xyz, qhull_options="QJ"); vol = float(ch.volume); hv = xyz[ch.vertices]
+            else:
+                vol = 0.0
         except QhullError:
             vol = 0.0
         occ = np.unique(np.floor(xyz / voxel).astype(np.int64), axis=0)
@@ -473,7 +477,10 @@ def tree_table(cloud: Cloud, ids, res=0.5, voxel=0.5):
             try:
                 lo, hi = occ.min(0), occ.max(0)
                 g = np.stack(np.meshgrid(*[np.arange(l, h_ + 1) for l, h_ in zip(lo, hi)], indexing="ij"), -1).reshape(-1, 3)
-                inside = Delaunay(xyz, qhull_options="QJ").find_simplex((g + 0.5) * voxel) >= 0
+                # Delaunay of the hull corners covers the same convex crown as Delaunay of all its points
+                # (much faster on dense clouds: thousands of points per crown)
+                inside = Delaunay(hv if hv is not None and len(hv) >= 5 else xyz,
+                                  qhull_options="QJ").find_simplex((g + 0.5) * voxel) >= 0
                 occ_set = np.zeros(len(g), bool)
                 occ_set[np.ravel_multi_index((occ - lo).T, tuple(hi - lo + 1))] = True
                 dens = 100.0 * occ_set.sum() / max((inside | occ_set).sum(), 1)

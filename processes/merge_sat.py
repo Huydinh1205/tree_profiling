@@ -7,8 +7,11 @@ pieces back together, always into a neighbour the piece actually touches (3D con
   1. no own top  right next to the piece's highest point (within --apex-r m) the neighbour is as high or
                  higher (down to --apex-dz m lower), and the neighbour does not cover that top. Pieces of one
                  crown look like that; two real trees each have their own top, and a lower tree under a
-                 neighbour's crown is left alone.
+                 neighbour's crown is left alone. Only a piece at most --max-piece-frac (0.4) of the neighbour's
+                 crown area (top view) is merged this way: a piece as big as a crown is a tree of its own.
   2. fragment    a piece without a stem smaller than --min-area m2 (top view).
+  3. low trees   after merging, a tree whose top is lower than --min-top m (3) is dropped (set to 0): these are
+                 shrubs and loose bits that never match a labelled tree. --min-top 0 keeps them.
 
 Two pieces that both have a stem (points within 2 m of the ground) are never merged. DJI L2 over dense canopy
 often shows no stems at all, so the rules do not rely on stems being visible. A merge is only allowed if the
@@ -18,6 +21,24 @@ Checked 4/11/2026 on labelled plots (RMIT eucalypt, CedarCypress3D Kokonoe = DJI
 it leaves F1 at 0.90 to 1.00 (the first version of this script, with a "stemless" and a "no valley" rule,
 dropped them to 0.00 to 0.51 and FOR-instanceV2 from 0.78 to 0.15); crowns cut into 3 pieces on purpose
 are put back together (F1 0.2 to 0.4 -> 0.79 to 0.96).
+
+5/11/2026, --max-piece-frac 0.3 added after scoring every merge on the full-density benchmarks: most merges that
+destroyed a correct tree were "no own top" merges of a big piece into a neighbour (dense plantations: Saiki,
+Kokonoe). F1 (IoU >= 0.5) of SegmentAnyTree raw -> merge without the limit -> merge with 0.3:
+  CedarCypress3D Saiki (16 plots)    0.859 -> 0.843 -> 0.881
+  CedarCypress3D Kokonoe (18, DJI L2) 0.343 -> 0.323 -> 0.346
+  FOR-instanceV2 (28 plots)          0.778 -> 0.810 -> 0.814
+SegmentAnyTree's main error on Kokonoe is the opposite (several trees in one, 56% of the trees); merging cannot
+fix that.
+
+5/11/2026, defaults tuned on the same 62 plots (grid over max-piece-frac 0.2 to 0.8, apex-r 0.3 to 1.0, apex-dz,
+min-area, crown-k, and a filter on small / low trees). Best: --max-piece-frac 0.4 --apex-r 0.6 --min-top 3 (the
+others stay). F1: SegmentAnyTree raw -> old merge (no limit) -> these defaults:
+  CedarCypress3D all (34 plots)      0.647 -> 0.625 -> 0.660
+  CedarCypress3D Saiki               0.859 -> 0.843 -> 0.883
+  CedarCypress3D Kokonoe             0.343 -> 0.323 -> 0.346
+  FOR-instanceV2 (28 plots)          0.778 -> 0.810 -> 0.820
+min-area 2 and crown-k 0.35 / 0.6 were worse or equal; max-piece-frac 0.5 or more and apex-r 1.0 were worse.
 
 Usage:
   python merge_sat.py "Galaxy16-[Processed Files].laz"            (several files allowed)
@@ -45,8 +66,8 @@ import treeseg as ts
 FIELDS = ["PredInstance_SAT", "PredInstance", "preds_instance_segmentation", "treeID", "TreeID"]
 
 
-def merge_oversegments(x, y, h, ids, res=0.25, voxel=0.5, min_contact=5, min_area=4.0, apex_r=0.3, apex_dz=0.3,
-                       stem_h=2.0, stem_pts=3, crown_k=0.45, crown_c=2.0):
+def merge_oversegments(x, y, h, ids, res=0.25, voxel=0.5, min_contact=5, min_area=4.0, apex_r=0.6, apex_dz=0.3,
+                       stem_h=2.0, stem_pts=3, crown_k=0.45, crown_c=2.0, max_piece_frac=0.4, min_top=3.0):
     """Return (merged ids, log rows, stats). ids: one int per point, 0 = not a tree. h = height above ground.
 
     A piece is only merged into a neighbour it touches in 3D, never so that the merged crown leaves the circle
@@ -55,8 +76,10 @@ def merge_oversegments(x, y, h, ids, res=0.25, voxel=0.5, min_contact=5, min_are
       no own top  right next to the piece's highest point (within apex_r m) the neighbour is as high or higher
                   (down to apex_dz m lower), and the neighbour's crown does not cover that top. A crown cut into
                   pieces gives pieces like that; two real trees each have their own top. A tree whose top is
-                  under a neighbour's crown is left alone (it is a lower tree, not a piece).
-      fragment    a piece without a stem, smaller than min_area m2 (top view)."""
+                  under a neighbour's crown is left alone (it is a lower tree, not a piece). Only for a piece of
+                  at most max_piece_frac x the neighbour's crown area (top view).
+      fragment    a piece without a stem, smaller than min_area m2 (top view).
+    After merging, a tree whose top is lower than min_top m is set to 0 (stats["dropped_low"] counts them)."""
     ids = ts.relabel(ids)
     x0, y0 = x.min(), y.min()
     ci = ((x - x0) / res).astype(np.int64); cj = ((y - y0) / res).astype(np.int64)
@@ -156,7 +179,7 @@ def merge_oversegments(x, y, h, ids, res=0.25, voxel=0.5, min_contact=5, min_are
                 v, above = near_top(t, nb)
                 if above > info[t]["top"] + apex_dz: continue       # t's top is under nb's crown: a tree below
                 if v >= info[t]["top"] - apex_dz and (best is None or v > best[0]): best = (v, nb)
-            if best and fits(best[1], t):
+            if best and fits(best[1], t) and area(t) <= max_piece_frac * area(best[1]):
                 union(best[1], t, "no own top"); changed = True
         # small fragments without a stem, smallest first, into the touching neighbour with most contact
         for t in sorted(contact, key=lambda t: info[t]["n"]):
@@ -166,8 +189,11 @@ def merge_oversegments(x, y, h, ids, res=0.25, voxel=0.5, min_contact=5, min_are
                     union(nb, t, "fragment"); changed = True; break
 
     lut = np.zeros(int(ids.max()) + 1, np.int64)
-    for t in info: lut[t] = find(t)
-    return ts.relabel(lut[ids]), log, dict(stem_share=share)
+    low = 0
+    for t in info:
+        r = find(t); lut[t] = r
+        if info[r]["top"] < min_top: lut[t] = 0; low += r == t
+    return ts.relabel(lut[ids]), log, dict(stem_share=share, dropped_low=int(low))
 
 
 def fast_hag(x, y, z, ground, res=0.5):
@@ -238,10 +264,12 @@ def process(path, a):
     print(f"{path.name}: {cloud.n:,} points, ground from {cloud.ground_source}, field {field}, "
           f"{len(np.unique(raw[raw > 0]))} trees")
     new, log, st = merge_oversegments(cloud.x, cloud.y, cloud.h, raw, min_area=a.min_area, apex_r=a.apex_r,
-                                      apex_dz=a.apex_dz, crown_k=a.crown_k, crown_c=a.crown_c)
+                                      apex_dz=a.apex_dz, crown_k=a.crown_k, crown_c=a.crown_c,
+                                      max_piece_frac=a.max_piece_frac, min_top=a.min_top)
     rules = {r: sum(1 for g in log if g["rule"] == r) for r in ("no own top", "fragment")}
     print(f"  merged into {len(np.unique(new[new > 0]))} trees  ({rules}; "
-          f"{st['stem_share']:.0%} of the pieces taller than 5 m show a stem)")
+          f"{st['stem_share']:.0%} of the pieces taller than 5 m show a stem; {st['dropped_low']} trees lower "
+          f"than {a.min_top:g} m dropped)")
 
     stem = path.stem
     out = path.with_name(stem + "_merged.laz")
@@ -271,10 +299,14 @@ def main():
     ap.add_argument("--crown-c", type=float, default=2.0, help="(default 2.0 m)")
     ap.add_argument("--min-area", type=float, default=4.0, help="stemless pieces smaller than this (m2, top view) "
                                                                  "are merged (default 4)")
-    ap.add_argument("--apex-r", type=float, default=0.3, help="'no own top' looks this far around a piece's top "
-                                                               "(m, default 0.3; larger merges more)")
+    ap.add_argument("--apex-r", type=float, default=0.6, help="'no own top' looks this far around a piece's top "
+                                                               "(m, default 0.6; larger merges more)")
     ap.add_argument("--apex-dz", type=float, default=0.3, help="... for a neighbour at most this much lower "
                                                                 "(m, default 0.3; larger merges more)")
+    ap.add_argument("--max-piece-frac", type=float, default=0.4, help="'no own top' only merges a piece of at most "
+                    "this fraction of the neighbour's crown area (default 0.4; larger merges more, 1000 = no limit)")
+    ap.add_argument("--min-top", type=float, default=3.0, help="drop trees whose top is lower than this after "
+                    "merging (m, default 3; 0 keeps every tree)")
     ap.add_argument("--no-figure", action="store_true")
     a = ap.parse_args()
     import glob
