@@ -48,6 +48,19 @@ def broken(p):
     return False
 
 
+def scored(dst, model):
+    """True when scores_all_runs.csv already has a row for this model. A prediction .npy without its row (a run
+    stopped between the two writes) must be scored again, otherwise the plot silently drops out of the report."""
+    import csv
+    f = dst / "scores_all_runs.csv"
+    if not f.exists():
+        return False
+    try:
+        return any(r.get("model") == model for r in csv.DictReader(open(f, newline="")))
+    except Exception:
+        return False
+
+
 def set_aside(p):
     """Rename a broken file to <name>.broken (replacing an older one), so it is made again."""
     p.replace(p.with_name(p.name + ".broken"))
@@ -110,7 +123,7 @@ def main():
                 set_aside(res)
                 print(f"{tag}: {name} result {res} is damaged, set aside; run the .bat again to make it again"); continue
             npy = dst / "predictions" / f"external_{name}.npy"
-            if npy.exists() and not a.redo and npy.stat().st_mtime >= res.stat().st_mtime:
+            if npy.exists() and not a.redo and npy.stat().st_mtime >= res.stat().st_mtime and scored(dst, f"external:{name}"):
                 continue                      # already scored, and the result has not changed since
             print(f"{tag}: scoring {name} ...", flush=True)
             rc = run([py, str(here / "process1_benchmark.py"), str(f), "--out", str(dst), "--models",

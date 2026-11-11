@@ -4,6 +4,7 @@
 !/.gitignore
 !/README.md
 !/processes/
+!/app/
 
 # Inside processes/: never commit outputs, examples or environments
 processes/results/

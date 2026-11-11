@@ -155,8 +155,9 @@ def pictures(a, folder, plots, models):
         out.append("</details>")
     print("  pictures: examples")
     ex = X.examples([folder / p for p in by_plot], lab_dirs, folder / "examples")
+    kinds = "drone and synthetic plots" if any(region_of(n) in SYNTHETIC for n in by_plot) else "drone plots"
     out += ["<h2>Examples: right and wrong</h2>",
-            "<p>Randomly chosen reference trees from the drone and synthetic plots (taller than 4 m, at least 150 points), for each model: "
+            f"<p>Randomly chosen reference trees from the {kinds} (taller than 4 m, at least 150 points), for each model: "
             "2 found correctly, then the error types. Top row seen from above, bottom row from the side. "
             "<b>Red</b> on the left is the reference tree; <b>red</b> on the right is the predicted tree that took most of its points "
             "(for a merged tree it also covers the neighbours). Grey = not assigned to any tree.</p>"]
@@ -248,26 +249,41 @@ def main():
     fig_regions(rows, models, folder / "fig_f1_by_region.png")
     if err: fig_errors(err, folder / "fig_error_types.png")
 
-    n_plots = len({p["plot"] for p in plots}); n_trees = next(r["gt"] for r in rows if r["region"] == G_ALL)
+    gt_of = {}
+    for p in plots: gt_of.setdefault(p["plot"], p["gt"])
+    n_plots = len(gt_of); n_trees = sum(gt_of.values())
     head = groups[0]                                        # real drone plots if any, else synthetic, else ALL
-    allrows = sorted([r for r in rows if r["region"] == head], key=lambda r: -r["f1"])
-    best = allrows[0]
+    in_head = lambda p: head == G_ALL or p["group"] == head
+    head_plots = sorted({p["plot"] for p in plots if in_head(p)})
+    done_by = {m: {p["plot"] for p in plots if p["model"] == m and in_head(p)} for m in models}
+    partial = {m: [n for n in head_plots if n not in done_by[m]] for m in models if len(done_by[m]) < len(head_plots)}
+    allrows = sorted([r for r in rows if r["region"] == head], key=lambda r: (r["model"] in partial, -r["f1"]))
+    best = allrows[0]                                       # a model scored on every plot beats one scored on a few
     fmt = {"precision": "{:.2f}", "recall": "{:.2f}", "f1": "{:.2f}", "f1_mean": "{:.2f}", "det_f1": "{:.2f}", "seconds": "{:.0f}"}
+    has_time = any(p["seconds"] > 0 for p in plots)         # external results (SegmentAnyTree) carry no run time
+    t_col = [("Run time (s)", "seconds")] if has_time else []
+    t_col_plot = [("s", "seconds")] if has_time else []
+    def short(names):
+        return ", ".join(names[:5]) + (f" and {len(names) - 5} more" if len(names) > 5 else "")
+    warn = "".join(f"**Not comparable:** {m} was scored on only {len(done_by[m])} of {len(head_plots)} plots "
+                   f"(missing: {short(miss)}), so its scores are not on the same trees as the others. "
+                   "Run it on the missing plots, or delete its results, before reading the comparison.\n\n"
+                   for m, miss in partial.items())
     # one line per model, one column per group: F1 (precision / recall)
     comp = []
     for r in allrows:
-        row = dict(model=r["model"])
+        row = dict(model=r["model"] + (f" (only {len(done_by[r['model']])} of {len(head_plots)} plots)" if r["model"] in partial else ""))
         for g in groups:
             q = next((x for x in rows if x["region"] == g and x["model"] == r["model"]), None)
             row[g] = f"**{q['f1']:.2f}** ({q['precision']:.2f} / {q['recall']:.2f})" if q else "n/a"
         comp.append(row)
-    gsize = {g: next(x for x in rows if x["region"] == g) for g in groups}
-    gcols = [(f"{g}: {gsize[g]['gt']} trees, {gsize[g]['plots']} plots", g) for g in groups]
+    gplots = {g: {p["plot"] for p in plots if g == G_ALL or p["group"] == g} for g in groups}
+    gcols = [(f"{g}: {sum(gt_of[n] for n in gplots[g])} trees, {len(gplots[g])} plots", g) for g in groups]
     md = [f"# {a.title}\n",
           f"{n_plots} labelled plots, {n_trees} reference trees. A predicted tree counts as correct when it shares at least "
           "half of its points with one reference tree (IoU >= 0.5, one-to-one), the FOR-instance / SegmentAnyTree rule. "
           "Scores are pooled over all trees (bigger plots weigh more).\n",
-          f"Best on {head.lower() if head != G_ALL else 'all plots'}: **{best['model']}**, F1 {best['f1']:.2f} "
+          warn + f"Best on {head.lower() if head != G_ALL else 'all plots'}: **{best['model']}**, F1 {best['f1']:.2f} "
           f"(precision {best['precision']:.2f}, recall {best['recall']:.2f}).\n",
           "## Overall\n",
           "F1 (precision / recall) per group of data:\n\n",
@@ -276,12 +292,13 @@ def main():
           "F1 combines both (1 = perfect). " + " ".join(t for g, t in [
               (G_REAL, "Real drone plots = real UAV laser scans with hand-labelled trees, the closest to our DJI L2 data."),
               (G_SYN, "Synthetic eucalypt = Synthetic Forest scenes (simulated scans, cleaner than real ones)."),
-              (G_GROUND, "Ground-based scans = BlueCat and NIBIO_MLS, very different from drone data.")] if g in groups) + "\n",
+              (G_GROUND, "Ground-based scans = " + " and ".join(sorted({p["region"] for p in plots if p["region"] in NON_DRONE}))
+               + ", very different from drone data.")] if g in groups) + "\n",
           "\nDetails per group:\n\n",
           T.md_table([r for g in groups for r in sorted([x for x in rows if x["region"] == g], key=lambda x: -x["f1"])],
                      [("Group", "region"), ("Model", "model"), ("Plots", "plots"), ("Reference trees", "gt"), ("Predicted trees", "pred"),
                       ("Correct", "matched"), ("Precision", "precision"), ("Recall", "recall"), ("F1", "f1"),
-                      ("Mean plot F1", "f1_mean"), ("Tree-top detection F1", "det_f1"), ("Run time (s)", "seconds")], fmt),
+                      ("Mean plot F1", "f1_mean"), ("Tree-top detection F1", "det_f1")] + t_col, fmt),
           "\n## By region\n", "![F1 by region](fig_f1_by_region.png)\n",
           T.md_table([dict(r, info=REGION_INFO.get(r["region"], "")) for r in rows if r["region"] not in GROUPS],
                      [("Region", "region"), ("Forest", "info"), ("Model", "model"), ("Plots", "plots"), ("Trees", "gt"),
@@ -299,13 +316,22 @@ def main():
     md += ["\n## Per plot\n",
            T.md_table(sorted(plots, key=lambda p: (p["plot"], p["model"])),
                       [("Plot", "plot"), ("Model", "model"), ("Reference", "gt"), ("Predicted", "pred"), ("Correct", "matched"),
-                       ("F1", "f1"), ("Tree-top detection F1", "det_f1"), ("s", "seconds")], {"f1": "{:.2f}", "det_f1": "{:.2f}", "seconds": "{:.0f}"}),
-           "\n## Notes\n",
-           "- Point clouds were thinned to the density in the folder name (e.g. plots_100 = 100 pts/m2) to look like our DJI L2 data.\n",
-           "- For reference, published on the full-resolution FOR-instanceV2 test set (same rule): SegmentAnyTree v1 about 0.75 (RMIT), "
-           "ForestFormer3D 0.82 to 0.84, SegmentAnyTreeV2 0.85. Thinning makes every model worse, so compare models within this report.\n",
-           "- Synthetic Forest scenes are simulated (HELIOS++), cleaner than real scans; use them to rank models, not to predict accuracy on our data.\n",
-           "- No model here saw these plots during tuning, except that the classical models' parameters were chosen on RMIT train.\n"]
+                       ("F1", "f1"), ("Tree-top detection F1", "det_f1")] + t_col_plot, {"f1": "{:.2f}", "det_f1": "{:.2f}", "seconds": "{:.0f}"}),
+           "\n## Notes\n"]
+    full_density = folder.name.endswith("_full") or "original density" in (a.title or "")
+    if full_density:
+        md += ["- Point clouds at the original density of each dataset, nothing thinned.\n"]
+    else:
+        md += ["- Point clouds were thinned to the density in the folder name (e.g. plots_100 = 100 pts/m2) to look like our DJI L2 data. "
+               "Thinning makes every model worse, so compare models within this report.\n"]
+    if any(p["region"] not in CEDAR for p in plots):
+        md += ["- For reference, published on the full-resolution FOR-instanceV2 test set (same rule): SegmentAnyTree v1 about 0.75 (RMIT), "
+               "ForestFormer3D 0.82 to 0.84, SegmentAnyTreeV2 0.85.\n"]
+    if any(p["region"] in SYNTHETIC for p in plots):
+        md += ["- Synthetic Forest scenes are simulated (HELIOS++), cleaner than real scans; use them to rank models, not to predict accuracy on our data.\n"]
+    md += ["- No model here saw these plots during tuning"
+           + (", except that the classical models' parameters were chosen on RMIT train" if any("SegmentAnyTree" not in m for m in models) else "")
+           + ". merge_sat's defaults were chosen on FOR-instanceV2 and CedarCypress3D at original density, so its scores on these two are optimistic.\n"]
     if any(p["region"] in CEDAR for p in plots):
         md += ["- CedarCypress3D: circular plots of about 12 m radius inside 36 x 36 m tiles. Only trees whose stem is inside the circle "
                "are labelled; the trees around them are in the data (models see them) but are not scored. Kokonoe was scanned with a "
