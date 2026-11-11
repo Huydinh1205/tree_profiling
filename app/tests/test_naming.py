@@ -94,6 +94,19 @@ class SaveFolderName(unittest.TestCase):                                        
         self.assertEqual(naming.next_free_name("Test Site", ["test site"]), "Test Site v2")
 
 
+class TypedDate(unittest.TestCase):                                             # NEW-4
+    def test_forms_people_type(self):
+        for text in ("13 Feb 25", "13 February 2025", "13/02/2025", "13.02.25", "2025-02-13", " 13-Feb-2025 "):
+            self.assertEqual(naming.parse_user_date(text), D, text)
+
+    def test_not_a_date(self):
+        for text in ("", "   ", "soon", "31 Feb 25", "13/13/2025", None):
+            self.assertIsNone(naming.parse_user_date(text), text)
+
+    def test_round_trip_with_the_display_form(self):
+        self.assertEqual(naming.parse_user_date(naming.format_capture_date(D)), D)
+
+
 class SafeName(unittest.TestCase):                                               # A-06
     def test_forbidden_characters(self):
         self.assertEqual(naming.safe_name('A/B:C*?"<>|D\\E'), "A B C D E")

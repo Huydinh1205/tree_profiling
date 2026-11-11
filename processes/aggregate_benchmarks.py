@@ -329,9 +329,10 @@ def main():
                "ForestFormer3D 0.82 to 0.84, SegmentAnyTreeV2 0.85.\n"]
     if any(p["region"] in SYNTHETIC for p in plots):
         md += ["- Synthetic Forest scenes are simulated (HELIOS++), cleaner than real scans; use them to rank models, not to predict accuracy on our data.\n"]
-    md += ["- No model here saw these plots during tuning"
-           + (", except that the classical models' parameters were chosen on RMIT train" if any("SegmentAnyTree" not in m for m in models) else "")
-           + ". merge_sat's defaults were chosen on FOR-instanceV2 and CedarCypress3D at original density, so its scores on these two are optimistic.\n"]
+    md += ["- SegmentAnyTree was not trained on these plots"
+           + ("; the classical models' parameters were chosen on RMIT train" if any("SegmentAnyTree" not in m for m in models) else "")
+           + ". But merge_sat's defaults were tuned on these same FOR-instanceV2 and CedarCypress3D plots (original density), "
+           "so the merge_sat scores here are optimistic; expect a smaller gain on new data.\n"]
     if any(p["region"] in CEDAR for p in plots):
         md += ["- CedarCypress3D: circular plots of about 12 m radius inside 36 x 36 m tiles. Only trees whose stem is inside the circle "
                "are labelled; the trees around them are in the data (models see them) but are not scored. Kokonoe was scanned with a "

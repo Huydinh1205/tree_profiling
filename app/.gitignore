@@ -1,0 +1,5 @@
+# made on each computer by setup_windows.bat or by the tests
+.venv/
+treeprof.ico
+.pytest_cache/
+__pycache__/

@@ -1,0 +1,2 @@
+# Windows runs .bat files reliably only with Windows line endings
+*.bat text eol=crlf

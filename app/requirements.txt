@@ -1,0 +1,6 @@
+# For the Tree Profiling app itself (Python 3.10 or newer). The processing scripts in ../processes
+# keep their own requirements and run with the Python the .bat files already use.
+PySide6-Essentials>=6.6,<7
+laspy[lazrs]>=2.5
+numpy>=1.24
+pyproj>=3.5

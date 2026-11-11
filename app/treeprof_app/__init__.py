@@ -5,4 +5,4 @@ The app does not change the processing scripts in ../processes. It only calls th
 saves / reopens results. Requirement codes in comments (NEW-4, SAVE-3 ...) refer to
 the app spec.
 """
-__version__ = "0.1.0"
+__version__ = "0.2.0"

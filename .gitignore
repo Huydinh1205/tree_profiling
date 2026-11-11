@@ -5,6 +5,7 @@
 !/README.md
 !/processes/
 !/app/
+!/.github/
 
 # Inside processes/: never commit outputs, examples or environments
 processes/results/

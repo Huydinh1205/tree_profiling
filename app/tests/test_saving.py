@@ -51,7 +51,8 @@ class Plan(Base):
         plan = saving.make_plan(self.w, self.dest, SITE, selected=set())
         self.assertEqual(plan.files["trees_csv"], "Test Site_trees.csv")
         self.assertEqual(plan.files["crowns_shp"], "Test Site_crowns.shp")
-        self.assertIsNone(plan.files["info_laz"])
+        self.assertEqual(plan.files["info_laz"], "Test Site_info.laz")       # the coloured cloud is always saved
+        self.assertIsNone(plan.files["sat_raw_laz"])
 
     def test_big_files_when_ticked(self):
         plan = saving.make_plan(self.w, self.dest, SITE, selected={"sat_merged_laz", "sat_raw_laz"})
@@ -128,12 +129,12 @@ class Execute(Base):
         saving.execute(plan, project(), copy_file=copy_file)
         self.assertTrue(plan.project_path.exists())
 
-    def test_without_3d_file(self):
+    def test_coloured_cloud_is_saved_even_when_nothing_is_ticked(self):
         plan = saving.make_plan(self.w, self.dest, SITE, selected=set())
         path = saving.execute(plan, project())
         data = projectfile.read_project(path)
-        self.assertIsNone(data["files"]["info_laz"])
-        self.assertNotIn("Test Site_info.laz", self.names())
+        self.assertEqual(data["files"]["info_laz"], "Test Site_info.laz")
+        self.assertIn("Test Site_info.laz", self.names())
         self.assertEqual(projectfile.check_openable(path, data), [])
 
     def test_saved_folder_can_be_moved_and_reopened(self):                       # A-27, OPEN-3

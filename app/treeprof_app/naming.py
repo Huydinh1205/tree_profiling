@@ -88,6 +88,30 @@ def project_folder(path) -> Optional[str]:
     return None
 
 
+def parse_user_date(text: str) -> Optional[dt.date]:
+    """A capture date typed by a person: 13 Feb 25, 13/02/2025, 13 February 2025 or 2025-02-13.
+    None if it is empty or not a date."""
+    t = (text or "").strip()
+    if not t:
+        return None
+    try:
+        return dt.date.fromisoformat(t)
+    except ValueError:
+        pass
+    m = re.match(r"^(\d{1,2})[\s/.\-]*([A-Za-z]{3,9})[\s/.\-]*(\d{4}|\d{2})$", t)
+    month = _month(m.group(2)) if m else None
+    if not m:
+        m = re.match(r"^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4}|\d{2})$", t)          # day first, as in Australia
+        month = int(m.group(2)) if m else None
+    if not m or not month:
+        return None
+    year = int(m.group(3))
+    try:
+        return dt.date(year + 2000 if year < 100 else year, month, int(m.group(1)))
+    except ValueError:
+        return None
+
+
 def format_capture_date(date: dt.date) -> str:
     """13 Feb 25 (English month whatever the Windows language is)."""
     return f"{date.day:02d} {_MONTHS[date.month - 1]} {date.year % 100:02d}"

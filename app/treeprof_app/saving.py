@@ -45,12 +45,11 @@ ITEMS = (
     SaveItem("trees_csv", steps.TREES_CSV, "_trees.csv", "Tree table (Excel)", always=True, default=True),
     SaveItem("crowns_shp", steps.CROWNS_SHP, "_crowns.shp", "Crown outlines (QGIS, CloudCompare)", always=True,
              default=True, parts_required=(".shx", ".dbf"), parts_optional=(".prj", ".cpg")),
-    SaveItem("info_laz", steps.INFO_LAZ, "_info.laz", "Point cloud with tree numbers (CloudCompare, 3D view)",
-             default=True),
+    SaveItem("info_laz", steps.INFO_LAZ, "_info.laz", "Coloured point cloud with tree numbers (CloudCompare, 3D view)",
+             always=True, default=True),
     SaveItem("sat_merged_laz", steps.SAT_MERGED, "_sat_merged.laz", "Segmentation after joining crowns"),
     SaveItem("sat_raw_laz", steps.SAT_RAW, "_sat_raw.laz", "Segmentation before joining crowns"),
 )
-NO_3D_WARNING = "3D view will not be available when you reopen"      # SAVE-3, shown when info_laz is unticked
 
 
 def default_selection() -> set:

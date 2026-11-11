@@ -1,7 +1,13 @@
 """Small helpers shared by the tests. No point cloud library is needed: the tests build LAS headers
 by hand and use tiny stand-in files."""
+import importlib.util
 import struct
 from pathlib import Path
+
+_spec = importlib.util.spec_from_file_location("_shp", Path(__file__).parent / "fake_pipeline" / "_shp.py")
+_shp = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_shp)
+write_crowns_shapefile = _shp.write_crowns          # (shp path, [(tree_id, [(x, y), ...])], z=None)
 
 
 def las_header_bytes(points, version=(1, 4), fmt=7, laz=False, bbox=(0.0, 0.0, 0.0, 100.0, 50.0, 30.0)):
