@@ -205,9 +205,13 @@ set "EXTRA="
 %PY% mosaic_labelled.py find "%MOS%\index.csv" --search "%MOS%" --out "%MOS%\sat_result.laz" >nul 2>&1
 if errorlevel 1 exit /b 0
 %PY% mosaic_labelled.py split "%MOS%\index.csv" "%MOS%\sat_result.laz" --out "%MOS%\sat_by_plot" >nul || exit /b 1
-%PY% -c "import os, sys; a, b, c = sys.argv[1:]; sys.exit(0 if os.path.exists(b) and os.path.getmtime(b) >= max(os.path.getmtime(a), os.path.getmtime(c)) else 1)" "%MOS%\sat_result.laz" "%MOS%\sat_result_merged.laz" merge_sat.py && goto satextra_split
+REM Merge again unless the merged file is newer than the SegmentAnyTree result AND was made by this exact merge_sat.py
+REM (its MD5 is kept in sat_result_merged.version). File dates alone are not enough: OneDrive / copies can keep a
+REM merged file that looks newer than merge_sat.py but was made by an older version (11/11/2026, FOR-instanceV2).
+%PY% -c "import hashlib, os, sys; a, b, c, s = sys.argv[1:]; h = hashlib.md5(open(c, 'rb').read()).hexdigest(); sys.exit(0 if os.path.exists(b) and os.path.exists(s) and open(s).read().strip() == h and os.path.getmtime(b) >= os.path.getmtime(a) else 1)" "%MOS%\sat_result.laz" "%MOS%\sat_result_merged.laz" merge_sat.py "%MOS%\sat_result_merged.version" && goto satextra_split
 echo   %NAME%: merging over-segmented SegmentAnyTree trees (merge_sat.py)...
 %PY% merge_sat.py "%MOS%\sat_result.laz" || exit /b 1
+%PY% -c "import hashlib, sys; open(sys.argv[2], 'w').write(hashlib.md5(open(sys.argv[1], 'rb').read()).hexdigest())" merge_sat.py "%MOS%\sat_result_merged.version" || exit /b 1
 :satextra_split
 %PY% mosaic_labelled.py split "%MOS%\index.csv" "%MOS%\sat_result_merged.laz" --out "%MOS%\sat_merged_by_plot" >nul || exit /b 1
 set "EXTRA=--external sat=%MOS%\sat_by_plot sat_merged=%MOS%\sat_merged_by_plot"
