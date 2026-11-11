@@ -272,20 +272,22 @@ def process(path, a):
           f"than {a.min_top:g} m dropped)")
 
     stem = path.stem
-    out = path.with_name(stem + "_merged.laz")
+    od = Path(a.out_dir) if getattr(a, "out_dir", None) else None
+    out = od / f"{stem}.laz" if od else path.with_name(stem + "_merged.laz")
     if "PredInstance_SAT_raw" not in names:
         L.add_extra_dim(laspy.ExtraBytesParams(name="PredInstance_SAT_raw", type=np.int32))
     L["PredInstance_SAT_raw"] = raw.astype(np.int32)
     if field in L.point_format.extra_dimension_names or field in L.point_format.dimension_names:
         L[field] = new.astype(np.asarray(L[field]).dtype)
     L.write(out)
-    import mosaic_labelled
-    mosaic_labelled.colour(argparse.Namespace(files=[str(out)], field=field))
-    with open(path.with_name(stem + "_merged_log.csv"), "w", newline="") as f:
+    if od is None:                                    # the coloured copy is for looking at, not for the benchmark
+        import mosaic_labelled
+        mosaic_labelled.colour(argparse.Namespace(files=[str(out)], field=field))
+    with open(od / f"{stem}_merged_log.csv" if od else path.with_name(stem + "_merged_log.csv"), "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=["piece", "into", "rule", "piece_top_m", "piece_area_m2", "x", "y"])
         w.writeheader(); w.writerows(log)
     if not a.no_figure:
-        topview(cloud, L, raw, new, path.with_name(stem + "_merged.png"))
+        topview(cloud, L, raw, new, od / f"{stem}_merged.png" if od else path.with_name(stem + "_merged.png"))
     print(f"  wrote {out.name}, {stem}_merged_colour.laz, .png and _log.csv in {time.time() - t0:.0f} s")
     return out
 
@@ -308,6 +310,10 @@ def main():
     ap.add_argument("--min-top", type=float, default=3.0, help="drop trees whose top is lower than this after "
                     "merging (m, default 3; 0 keeps every tree)")
     ap.add_argument("--no-figure", action="store_true")
+    ap.add_argument("--out-dir", help="write <out-dir>/<name>.laz (same name as the input) instead of <name>_merged.laz "
+                    "next to the input; used by the benchmark to merge every plot on its own")
+    ap.add_argument("--skip-done", action="store_true", help="with --out-dir: skip a file whose merged copy is newer "
+                    "than it and was made by this exact merge_sat.py (MD5 kept in <out-dir>/merge_sat.version)")
     a = ap.parse_args()
     import glob
     files = []
@@ -315,9 +321,24 @@ def main():
         p = Path(f)
         if p.is_dir(): files += sorted(p.glob("*.la[sz]")) + sorted(p.glob("*.zip"))
         else: files += [Path(h) for h in sorted(glob.glob(f))] or [p]
+    import hashlib
+    md5 = hashlib.md5(Path(__file__).read_bytes()).hexdigest()
+    od = Path(a.out_dir) if a.out_dir else None
+    stamp = od / "merge_sat.version" if od else None
+    if od:
+        od.mkdir(parents=True, exist_ok=True)
+        same_code = stamp.exists() and stamp.read_text().strip() == md5
+        if stamp.exists() and not same_code:
+            stamp.unlink()                            # code changed: every plot is merged again
     for f in files:
         if f.stem.endswith(("_merged", "_colour", "_merged_colour")): continue
+        if od and a.skip_done and same_code and (od / f"{f.stem}.laz").exists() \
+                and (od / f"{f.stem}.laz").stat().st_mtime >= f.stat().st_mtime:
+            continue
         process(f, a)
+    if od:
+        stamp.write_text(md5)
+        print(f"merge_sat.py MD5 {md5}")
 
 
 if __name__ == "__main__":

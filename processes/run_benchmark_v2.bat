@@ -198,22 +198,19 @@ echo   %NAME%: SegmentAnyTree result found, adding it to the report...
 exit /b 0
 
 :satextra
-REM If the mosaic has a SegmentAnyTree result: split it per plot (sat), merge its over-segmented pieces with
-REM merge_sat.py (again when the result or merge_sat.py is newer than the merged file) and split that too (sat_merged).
+REM If the mosaic has a SegmentAnyTree result: split it per plot (sat), then merge the over-segmented pieces of
+REM each plot with merge_sat.py (sat_merged).
 REM Sets EXTRA for benchmark_folder.py; EXTRA stays empty when there is no result yet.
 set "EXTRA="
 %PY% mosaic_labelled.py find "%MOS%\index.csv" --search "%MOS%" --out "%MOS%\sat_result.laz" >nul 2>&1
 if errorlevel 1 exit /b 0
 %PY% mosaic_labelled.py split "%MOS%\index.csv" "%MOS%\sat_result.laz" --out "%MOS%\sat_by_plot" >nul || exit /b 1
-REM Merge again unless the merged file is newer than the SegmentAnyTree result AND was made by this exact merge_sat.py
-REM (its MD5 is kept in sat_result_merged.version). File dates alone are not enough: OneDrive / copies can keep a
-REM merged file that looks newer than merge_sat.py but was made by an older version (11/11/2026, FOR-instanceV2).
-%PY% -c "import hashlib, os, sys; a, b, c, s = sys.argv[1:]; h = hashlib.md5(open(c, 'rb').read()).hexdigest(); sys.exit(0 if os.path.exists(b) and os.path.exists(s) and open(s).read().strip() == h and os.path.getmtime(b) >= os.path.getmtime(a) else 1)" "%MOS%\sat_result.laz" "%MOS%\sat_result_merged.laz" merge_sat.py "%MOS%\sat_result_merged.version" && goto satextra_split
-echo   %NAME%: merging over-segmented SegmentAnyTree trees (merge_sat.py)...
-%PY% merge_sat.py "%MOS%\sat_result.laz" || exit /b 1
-%PY% -c "import hashlib, sys; open(sys.argv[2], 'w').write(hashlib.md5(open(sys.argv[1], 'rb').read()).hexdigest())" merge_sat.py "%MOS%\sat_result_merged.version" || exit /b 1
-:satextra_split
-%PY% mosaic_labelled.py split "%MOS%\index.csv" "%MOS%\sat_result_merged.laz" --out "%MOS%\sat_merged_by_plot" >nul || exit /b 1
+REM Merge every plot ON ITS OWN (merge_sat.py --out-dir), like a real survey file and like the 5/11/2026 tuning.
+REM merge_sat.py skips plots already merged by this exact version (MD5 in sat_merged_by_plot\merge_sat.version)
+REM and merges them all again when merge_sat.py changes. (Until 11/11/2026 the whole mosaic was merged at once,
+REM with a date check that missed a changed merge_sat.py on FOR-instanceV2.)
+echo   %NAME%: merging over-segmented SegmentAnyTree trees, plot by plot (merge_sat.py)...
+%PY% merge_sat.py "%MOS%\sat_by_plot" --out-dir "%MOS%\sat_merged_by_plot" --skip-done --no-figure || exit /b 1
 set "EXTRA=--external sat=%MOS%\sat_by_plot sat_merged=%MOS%\sat_merged_by_plot"
 exit /b 0
 
