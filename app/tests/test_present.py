@@ -57,6 +57,16 @@ class NewRun(unittest.TestCase):
 
     def test_file_facts(self):
         self.assertEqual(present.file_facts(self.report(), None), [])
+        from types import SimpleNamespace
+        rep = self.report()
+        rep.header = SimpleNamespace(points=54_000_000, width=900.0, height=600.0, bbox_density=100.0)
+        facts = dict(present.file_facts(rep, None))
+        self.assertEqual((facts["Points"], facts["Trees found in"]), ("54,000,000", "Tiles of up to 20,000,000 points"))
+        self.assertEqual(dict(present.file_facts(rep, None, 60_000_000))["Trees found in"], "One go")
+
+    def test_a_file_is_cut_only_when_it_has_more_points_than_the_limit(self):         # NEW-9, like sat_docker.py
+        self.assertEqual(present.tiles_text(20_000_000, 20_000_000), "One go")
+        self.assertEqual(present.tiles_text(20_000_001, 20_000_000), "Tiles of up to 20,000,000 points")
 
 
 class Running(unittest.TestCase):

@@ -6,6 +6,7 @@ import threading
 from typing import Callable, Optional
 
 from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (QFileDialog, QFrame, QHBoxLayout, QInputDialog, QLabel, QMessageBox, QPushButton,
                                QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 
@@ -60,6 +61,39 @@ QCheckBox { spacing: 8px; }
 QDialog, QMessageBox, QInputDialog { background: #FFFFFF; }
 QToolTip { background: #1B2420; color: #FFFFFF; border: none; padding: 6px; }
 """
+
+LIGHT = {                                    # the app is always light, also when Windows is set to dark mode
+    QPalette.Window: "#F4F6F3", QPalette.WindowText: "#1B2420", QPalette.Base: "#FFFFFF",
+    QPalette.AlternateBase: "#F4F6F3", QPalette.Text: "#1B2420", QPalette.PlaceholderText: "#7A8680",
+    QPalette.Button: "#FFFFFF", QPalette.ButtonText: "#1B2420", QPalette.BrightText: "#FFFFFF",
+    QPalette.ToolTipBase: "#FFFFFF", QPalette.ToolTipText: "#1B2420", QPalette.Highlight: "#1F6B4A",
+    QPalette.HighlightedText: "#FFFFFF", QPalette.Link: "#1F6B4A", QPalette.Light: "#FFFFFF",
+    QPalette.Midlight: "#EEF2EE", QPalette.Mid: "#B9C3BC", QPalette.Dark: "#8C9891", QPalette.Shadow: "#4E5A54",
+}
+LIGHT_DISABLED = {QPalette.WindowText: "#8C9891", QPalette.Text: "#8C9891", QPalette.ButtonText: "#8C9891",
+                  QPalette.Base: "#F4F6F3", QPalette.Button: "#E3E8E4"}
+
+
+def light_palette() -> QPalette:
+    palette = QPalette()
+    for role, colour in LIGHT.items():
+        palette.setColor(role, QColor(colour))
+    for role, colour in LIGHT_DISABLED.items():
+        palette.setColor(QPalette.Disabled, role, QColor(colour))
+    return palette
+
+
+def apply_look(app) -> None:
+    """Fusion, the app's light colours and its style sheet. Without the palette, Windows in dark mode gives the
+    boxes a dark background while the style sheet keeps the text dark: dark on dark."""
+    try:
+        app.styleHints().setColorScheme(Qt.ColorScheme.Light)          # Qt 6.8 and newer
+    except AttributeError:
+        pass
+    app.setStyle("Fusion")
+    app.setPalette(light_palette())
+    app.setStyleSheet(STYLE)
+
 
 
 # ---------------------------------------------------------------------------------- building blocks

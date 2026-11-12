@@ -140,6 +140,49 @@ def test_new_run_reads_the_file_and_the_folder_name(make):                      
     assert h.find("start").isEnabled() and h.find("start").text() == "Start"
 
 
+def _readable(h, where):
+    """Every box on the screen: light background, dark text, and actually drawn light."""
+    from PySide6.QtGui import QPalette
+    from PySide6.QtWidgets import QAbstractSpinBox, QComboBox, QLineEdit
+    boxes = [w for kind in (QComboBox, QAbstractSpinBox, QLineEdit) for w in h.win.findChildren(kind) if w.isVisible()]
+    assert boxes, where
+    for box in boxes:
+        base, text = box.palette().color(QPalette.Base), box.palette().color(QPalette.Text)
+        assert base.lightness() > 200 and text.lightness() < 80, (where, box.objectName(), base.name(), text.name())
+        image = box.grab().toImage()
+        assert image.pixelColor(image.width() // 2, image.height() // 2).lightness() > 150, (where, box.objectName())
+    return len(boxes)
+
+
+def test_boxes_stay_readable_when_windows_is_in_dark_mode(make):               # the test app starts dark (conftest)
+    from conftest import make_saved
+    h = make()
+    new_run_with_file(h)
+    h.press("Advanced")
+    assert _readable(h, "New run") >= 5                            # path, run by, site, date, max points
+    h.win.go_settings()
+    h.settle()
+    assert _readable(h, "Settings") >= 2                           # free space warning, days kept
+    h.win.go_saved(make_saved(h.tmp / "saved", 20))
+    h.settle()
+    h.win.page.findChild(object, "tabs").setCurrentIndex(0)       # Trees: colour by, find, heights, QC
+    h.pump()
+    assert _readable(h, "Results") >= 4
+    from PySide6.QtGui import QPalette
+    popup = h.find("colour_by").view()                              # the list that drops down
+    assert popup.palette().color(QPalette.Base).lightness() > 200
+
+
+def test_max_points_is_explained_and_says_whether_the_file_is_cut(make):        # NEW-9
+    h = make()
+    new_run_with_file(h)
+    assert h.sees("Trees found in") and h.sees("One go")           # 5,000 points: no tiles
+    h.press("Advanced")
+    assert "not the size of your file" in h.text("max_points_help")
+    h.find("max_points").setValue(2_000_000)
+    assert h.sees("One go") and h.find("site").text() == "Test Site"   # the list is drawn again, nothing lost
+
+
 def test_browse_adds_the_chosen_files_once(make):
     h = make()
     h.dialogs.files = [str(h.input), str(h.input)]

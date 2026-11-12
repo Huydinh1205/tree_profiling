@@ -22,7 +22,7 @@ from PySide6.QtWidgets import QPushButton                      # noqa: E402
 from tests.helpers import write_las_stub                       # noqa: E402
 from treeprof_app import saving                                # noqa: E402
 from treeprof_app.appstate import AppState                     # noqa: E402
-from treeprof_app.gui.common import STYLE                      # noqa: E402
+from treeprof_app.gui.common import apply_look                 # noqa: E402
 from treeprof_app.gui.main import MainWindow                   # noqa: E402
 from treeprof_app.runner import RunnerConfig                   # noqa: E402
 
@@ -178,8 +178,13 @@ class Harness:
 
 @pytest.fixture(scope="session", autouse=True)
 def styled(qapp):
-    qapp.setStyle("Fusion")
-    qapp.setStyleSheet(STYLE)
+    from PySide6.QtGui import QColor, QPalette
+    dark = QPalette()                                              # as if Windows is set to dark mode
+    for role, colour in ((QPalette.Window, "#202020"), (QPalette.Base, "#2B2B2B"), (QPalette.Button, "#2B2B2B"),
+                         (QPalette.Text, "#FFFFFF"), (QPalette.WindowText, "#FFFFFF"), (QPalette.ButtonText, "#FFFFFF")):
+        dark.setColor(role, QColor(colour))
+    qapp.setPalette(dark)
+    apply_look(qapp)                                               # what the app does at start
     return qapp
 
 

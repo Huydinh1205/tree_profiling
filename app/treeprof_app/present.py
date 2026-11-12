@@ -117,7 +117,8 @@ def ground_text(source) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------------- New run
-def file_facts(report: checks.FileReport, estimate_minutes: Optional[float]) -> list:
+def file_facts(report: checks.FileReport, estimate_minutes: Optional[float],
+               max_points: int = steps.DEFAULT_MAX_POINTS) -> list:
     """NEW-2, NEW-6: (label, value) of a chosen point cloud; [] when its header cannot be read."""
     h = report.header
     if not h:
@@ -126,7 +127,15 @@ def file_facts(report: checks.FileReport, estimate_minutes: Optional[float]) -> 
             ("Area covered", f"{h.width:,.0f} m × {h.height:,.0f} m"),
             ("Density", f"{h.bbox_density:,.0f} points per m²"),
             ("Coordinate system", report.crs_name if report.crs_name not in (None, "?") else "–"),
-            ("Time needed", f"About {fmt_duration(estimate_minutes * 60)}" if estimate_minutes else "No estimate yet")]
+            ("Time needed", f"About {fmt_duration(estimate_minutes * 60)}" if estimate_minutes else "No estimate yet"),
+            ("Trees found in", tiles_text(h.points, max_points))]
+
+
+def tiles_text(points: int, max_points: int) -> str:
+    """NEW-9: whether sat_docker.py runs the file in one go or cuts it into tiles (it cuts when points > max)."""
+    if points <= max_points:
+        return "One go"
+    return f"Tiles of up to {max_points:,} points"
 
 
 def start_problem(files: list, run_by: str) -> Optional[str]:

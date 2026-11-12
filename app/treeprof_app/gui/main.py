@@ -18,7 +18,7 @@ from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QMenu, QSystemT
 
 from .. import desktop, projectfile, store as st
 from ..appstate import AppState
-from .common import STYLE, Background, Dialogs, button, frame
+from .common import Background, Dialogs, apply_look, button, frame
 from .dialogs import SettingsPage
 from .pages import LAS_SUFFIXES, HomePage, NewRunPage, RunPage
 from .results import open_page
@@ -350,8 +350,7 @@ def run(home, file: Optional[str] = None, show: bool = True) -> int:
     app = QApplication.instance() or QApplication(sys.argv[:1])
     app.setApplicationName("Tree Profiling")
     app.setWindowIcon(app_icon())
-    app.setStyle("Fusion")
-    app.setStyleSheet(STYLE)
+    apply_look(app)
     app.setQuitOnLastWindowClosed(False)
     if send_to_running({"open": file}):
         return 0

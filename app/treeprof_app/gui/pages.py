@@ -286,8 +286,13 @@ class NewRunPage(Page):
         self.max_points.setGroupSeparatorShown(True)
         self.max_points.setValue(steps.DEFAULT_MAX_POINTS)
         self.max_points.setFixedWidth(320)
+        self.max_points.valueChanged.connect(lambda _: self.show_files() if self.files else None)
         adv.addLayout(row(column(label("Max points per tile", "muted"), self.max_points), None))
-        adv.addWidget(label("Lower it only if a run stopped because the file was too large.", "muted"))
+        adv.addWidget(label("The most points the tree-finding step takes at once. This is not the size of your file: "
+                            "a file with more points is cut into tiles of at most this many points, so the graphics "
+                            "card and memory are not overloaded, and the tiles are put back together at the end. "
+                            "Lower it only if a run stopped because the file was too large.", "muted", wrap=True,
+                            name="max_points_help"))
         self.advanced.setVisible(False)
         lay.addLayout(row(button("Advanced", lambda: self.advanced.setVisible(not self.advanced.isVisible()), "flat",
                                  name="advanced"), None))
@@ -355,7 +360,8 @@ class NewRunPage(Page):
                 lay.addWidget(label("Checking this file...", "muted"))
                 self.cards.addWidget(card)
                 continue
-            facts = present.file_facts(rep, self.state.estimate_minutes(rep.header.points) if rep.header else None)
+            facts = present.file_facts(rep, self.state.estimate_minutes(rep.header.points) if rep.header else None,
+                                       self.max_points.value())
             if facts:
                 grid = QGridLayout()
                 grid.setHorizontalSpacing(30)
