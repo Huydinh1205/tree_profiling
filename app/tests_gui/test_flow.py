@@ -149,9 +149,16 @@ def _readable(h, where):
     for box in boxes:
         base, text = box.palette().color(QPalette.Base), box.palette().color(QPalette.Text)
         assert base.lightness() > 200 and text.lightness() < 80, (where, box.objectName(), base.name(), text.name())
-        image = box.grab().toImage()
-        assert image.pixelColor(image.width() // 2, image.height() // 2).lightness() > 150, (where, box.objectName())
+        assert _mostly_light(box.grab().toImage()), (where, box.objectName())
     return len(boxes)
+
+
+def _mostly_light(image) -> bool:
+    """Most of the inside of the box is drawn light. One pixel is not enough: in a narrow box the middle can fall
+    on a letter, and letters are drawn differently on Windows and Linux."""
+    w, h = image.width(), image.height()
+    inside = [image.pixelColor(x, y).lightness() for x in range(4, w - 4, 2) for y in range(4, h - 4, 2)]
+    return sum(v > 200 for v in inside) > 0.6 * len(inside)
 
 
 def test_boxes_stay_readable_when_windows_is_in_dark_mode(make):               # the test app starts dark (conftest)
