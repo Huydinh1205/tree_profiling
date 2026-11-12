@@ -205,7 +205,8 @@ class SettingsPage(Page):
         self.body.addWidget(card)
 
         card, lay = frame()                                                        # HOME-3
-        lay.addLayout(row(label("This computer", "h2"), None, button("Check again", self.recheck, name="check_again")))
+        self.again = button("Check again", self.recheck, name="check_again")
+        lay.addLayout(row(label("This computer", "h2"), None, self.again))
         self.computer = QVBoxLayout()
         lay.addLayout(self.computer)
         self.body.addWidget(card)
@@ -297,7 +298,16 @@ class SettingsPage(Page):
 
     # ---- this computer
     def recheck(self) -> None:
-        self.win.bg.run(lambda: self.state.machine(True), lambda r, e: self.show_computer())
+        if not self.again.isEnabled():
+            return
+        self.again.setText("Checking...")
+        self.again.setEnabled(False)
+
+        def done(result, error) -> None:
+            self.again.setText("Check again")
+            self.again.setEnabled(True)
+            self.show_computer()
+        self.win.bg.run(lambda: self.state.machine(True), done)
 
     def show_computer(self) -> None:
         clear(self.computer)

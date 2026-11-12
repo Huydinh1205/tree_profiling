@@ -41,6 +41,33 @@ def test_home_says_what_is_wrong_with_the_computer(make):                       
     assert h.text("machine_problem").startswith("Docker is not running. Open Docker Desktop")
 
 
+def test_home_sees_docker_being_closed_without_a_click(make):                  # HOME-3
+    h = make()
+    assert h.sees("Docker running") and h.text("checked_at").startswith("Checked at ")
+    h.machine_code = 1                                             # Docker Desktop is quit
+    h.tick()
+    h.settle()
+    assert h.sees("Docker running")                                # not asked again within half a minute
+    h.state._machine_at -= 31
+    h.tick()
+    h.settle()
+    assert h.text("machine_problem").startswith("Docker is not running")
+
+
+def test_check_again_shows_that_it_is_checking(make):                          # HOME-3
+    import threading
+    h = make()
+    answer = threading.Event()
+    h.state._machine_runner = lambda cmd: 0 if answer.wait(20) else -1   # Docker takes its time to answer
+    h.press("Check again")
+    assert h.find("check_again").text() == "Checking..." and not h.find("check_again").isEnabled()
+    h.tick()                                                       # no second check on top of the first
+    assert h.win.bg.running == 1
+    answer.set()
+    h.settle()
+    assert h.find("check_again").text() == "Check again" and h.find("check_again").isEnabled()
+
+
 def test_a_run_cut_off_by_a_restart_can_be_resumed(make):                       # SYS-5
     h = make(tiles=3, tile_seconds=1.0)
     run_id = h.add()

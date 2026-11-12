@@ -1,4 +1,5 @@
 """Settings, Storage and the log for support (STO-1 to STO-5, SET-1 to SET-5, SYS-6)."""
+import threading
 import zipfile
 from pathlib import Path
 
@@ -99,9 +100,13 @@ def test_this_computer_and_about(make):                                         
     h = make(machine_code=1)
     settings(h)
     assert h.sees("Docker is not running") and "Tree Profiling 0." in h.text("about")
-    h.machine_code = 0
+    answer = threading.Event()
+    h.state._machine_runner = lambda cmd: 0 if answer.wait(20) else -1    # Docker takes its time to answer
     h.press("Check again")
+    assert h.find("check_again").text() == "Checking..." and not h.find("check_again").isEnabled()
+    answer.set()
     h.settle()
+    assert h.find("check_again").text() == "Check again"
     assert h.sees("Docker running") and not h.sees("Docker is not running")
 
 

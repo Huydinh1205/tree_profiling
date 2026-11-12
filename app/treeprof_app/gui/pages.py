@@ -1,6 +1,7 @@
 """Home, New run and the progress of a run (HOME, NEW, RUN)."""
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -9,6 +10,7 @@ from PySide6.QtWidgets import (QComboBox, QGridLayout, QLabel, QLineEdit, QPlain
                                QVBoxLayout, QWidget)
 
 from .. import checks, desktop, naming, present, steps, store as st
+from ..appstate import MACHINE_FRESH
 from .common import (Page, button, check_row, clear, column, frame, label, line, pill, row, status_pill)
 
 LAS_SUFFIXES = (".las", ".laz")
@@ -21,6 +23,7 @@ class HomePage(Page):
         self.machine_box = QVBoxLayout()
         self.machine_box.setSpacing(8)
         self.body.addLayout(self.machine_box)
+        self.checking = False
         self.body.addLayout(row(
             column(label("Runs", "h1"), label("Start a new run, or open results you saved before.", "muted")), None,
             button("Open saved results", self.open_saved, name="open_saved"),
@@ -41,7 +44,19 @@ class HomePage(Page):
 
     # ---- HOME-3, HOME-6
     def recheck(self) -> None:
-        self.win.bg.run(lambda: self.state.machine(True), lambda r, e: self.show_machine())
+        """Ask again, off the main thread (Docker can take a few seconds to answer while it starts or stops)."""
+        if self.checking:
+            return
+        self.checking = True
+        self.show_machine()
+
+        def done(result, error) -> None:
+            self.checking = False
+            self.show_machine()
+        self.win.bg.run(lambda: self.state.machine(True), done)
+
+    def machine_is_old(self) -> bool:
+        return self.state._machine is not None and time.time() - self.state._machine_at > MACHINE_FRESH
 
     def show_machine(self) -> None:
         clear(self.machine_box)
@@ -59,7 +74,11 @@ class HomePage(Page):
             lay.addWidget(label(c.text))
             chip.setToolTip(c.help or c.text)
             chips.append(chip)
-        self.machine_box.addLayout(row(*chips, button("Check again", self.recheck, "flat", name="check_again"), None))
+        again = button("Checking..." if self.checking else "Check again", self.recheck, "flat", name="check_again")
+        again.setEnabled(not self.checking)
+        when = time.strftime("%H:%M", time.localtime(self.state._machine_at)) if self.state._machine_at else ""
+        self.machine_box.addLayout(row(*chips, again, label(f"Checked at {when}" if when else "", "muted",
+                                                            name="checked_at"), None))
         problem = next((c for c in found if c.level == checks.ERROR), None)
         if problem:
             banner, lay = frame("banner_error", (14, 10, 14, 10))
@@ -85,6 +104,8 @@ class HomePage(Page):
                 (cur["id"], live.label, round(live.fraction or 0, 2), dict(live.steps)) if cur and live else None)
 
     def tick(self) -> None:
+        if not self.checking and self.machine_is_old():                # Docker may have been closed or opened meanwhile
+            self.recheck()
         sig = self.signature()
         if sig == self.seen:
             return

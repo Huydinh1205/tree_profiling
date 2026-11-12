@@ -9,6 +9,12 @@ pieces back together, always into a neighbour the piece actually touches (3D con
                  crown look like that; two real trees each have their own top, and a lower tree under a
                  neighbour's crown is left alone. Only a piece at most --max-piece-frac (0.4) of the neighbour's
                  crown area (top view) is merged this way: a piece as big as a crown is a tree of its own.
+     wide crown  a piece with no point lower than 2 m above ground, next to a tree with a stem whose crown is
+                 at least --wide-crown (0.5) times as wide as the tree is tall (open-grown eucalypts, paddock
+                 trees): "no own top" looks --wide-apex-r (2 m) around the piece's top instead of --apex-r, and
+                 the crown circle may be centred on that tree's stem as well as on its highest point. Side
+                 branches of a broad crown often have their top more than 0.6 m from the main crown, and the
+                 highest point of a broad crown can sit metres away from its stem.
   2. fragment    a piece without a stem smaller than --min-area m2 (top view).
   3. low trees   after merging, a tree whose top is lower than --min-top m (3) is dropped (set to 0): these are
                  shrubs and loose bits that never match a labelled tree. --min-top 0 keeps them.
@@ -40,6 +46,17 @@ others stay). F1: SegmentAnyTree raw -> old merge (no limit) -> these defaults:
   FOR-instanceV2 (28 plots)          0.778 -> 0.810 -> 0.820
 min-area 2 and crown-k 0.35 / 0.6 were worse or equal; max-piece-frac 0.5 or more and apex-r 1.0 were worse.
 
+12/11/2026, "wide crown" added. On a company survey (open-grown eucalypts) one 22 m tree with a 314 m2 crown was
+still 6 trees: 5 stemless side branches, kept apart because their top was more than 0.6 m from the main crown and
+the crown circle was centred on a top 4.6 m from the stem. Doing this for every stemless piece next to a tree with
+a stem breaks forests (on the 62 plots 43 wrong merges for 11 right ones: there a stemless piece is usually a tree
+whose stem the scanner did not see), and only the width of the receiving crown told the two apart: every such
+merge on the labelled plots went into a crown narrower than 0.5 x its height (median tree with a stem: Saiki
+0.19, FOR-instanceV2 0.25, Kokonoe 0.34; the company survey 0.42, that tree 0.92). With --wide-crown 0.5 the F1
+of all 62 plots is unchanged (0.660 / 0.883 / 0.346 / 0.820), so the labelled plots only show that the rule does
+no harm there; whether it is right on eucalypts was checked by eye on 11 trees, not scored. --wide-crown 0 turns
+it off.
+
 Usage:
   python merge_sat.py "Galaxy16-[Processed Files].laz"            (several files allowed)
   python merge_sat.py result.laz --apex-r 0.5                       (merges more)
@@ -67,7 +84,8 @@ FIELDS = ["PredInstance_SAT", "PredInstance", "preds_instance_segmentation", "tr
 
 
 def merge_oversegments(x, y, h, ids, res=0.25, voxel=0.5, min_contact=5, min_area=4.0, apex_r=0.6, apex_dz=0.3,
-                       stem_h=2.0, stem_pts=3, crown_k=0.45, crown_c=2.0, max_piece_frac=0.4, min_top=3.0):
+                       stem_h=2.0, stem_pts=3, crown_k=0.45, crown_c=2.0, max_piece_frac=0.4, min_top=3.0,
+                       wide_crown=0.5, wide_apex_r=2.0):
     """Return (merged ids, log rows, stats). ids: one int per point, 0 = not a tree. h = height above ground.
 
     A piece is only merged into a neighbour it touches in 3D, never so that the merged crown leaves the circle
@@ -78,6 +96,10 @@ def merge_oversegments(x, y, h, ids, res=0.25, voxel=0.5, min_contact=5, min_are
                   pieces gives pieces like that; two real trees each have their own top. A tree whose top is
                   under a neighbour's crown is left alone (it is a lower tree, not a piece). Only for a piece of
                   at most max_piece_frac x the neighbour's crown area (top view).
+      wide crown  "no own top" for a piece with no point below stem_h next to a tree with a stem whose crown
+                  (equivalent diameter of its top-view area) is at least wide_crown x its height: looks
+                  wide_apex_r around the piece's top, and the crown circle may be centred on that tree's stem
+                  as well as on the taller top. wide_crown 0 turns it off.
       fragment    a piece without a stem, smaller than min_area m2 (top view).
     After merging, a tree whose top is lower than min_top m is set to 0 (stats["dropped_low"] counts them)."""
     ids = ts.relabel(ids)
@@ -122,8 +144,11 @@ def merge_oversegments(x, y, h, ids, res=0.25, voxel=0.5, min_contact=5, min_are
         p = order[s:e]; j = p[np.argmax(hp[p])]
         cc = ci[p] * H + cj[p]; oo = np.argsort(hp[p])
         r = dict(zip(cc[oo].tolist(), hp[p][oo].tolist()))
-        info[t] = dict(top=float(hp[j]), tx=float(x[j]), ty=float(y[j]), n=len(p), r=r,
-                       stem=bool((hp[p] < stem_h).sum() >= stem_pts))
+        low = hp[p] < stem_h; nlow = int(low.sum())
+        info[t] = dict(top=float(hp[j]), tx=float(x[j]), ty=float(y[j]), n=len(p), r=r, low=nlow,
+                       stem=nlow >= stem_pts)
+        if nlow:                                          # where the stem is: middle of the points near the ground
+            info[t]["sx"], info[t]["sy"] = float(np.median(x[p][low])), float(np.median(y[p][low]))
     tall = [t for t in info if info[t]["top"] > 5]
     share = float(np.mean([info[t]["stem"] for t in tall])) if tall else 0.0
 
@@ -140,12 +165,31 @@ def merge_oversegments(x, y, h, ids, res=0.25, voxel=0.5, min_contact=5, min_are
         px = x0 + (c // H + 0.5) * res; py = y0 + (c % H + 0.5) * res
         return float(np.hypot(px - A["tx"], py - A["ty"]).max()) <= crown_k * A["top"] + crown_c
 
-    kr = max(1, int(round(apex_r / res)))
-    disk = [(di, dj) for di in range(-kr, kr + 1) for dj in range(-kr, kr + 1) if di * di + dj * dj <= kr * kr]
-    def near_top(t, nb):
-        """(highest canopy of nb within apex_r of t's top, canopy of nb right above t's top)"""
+    def fits_stem(nb, t):
+        """Like fits(), but the circle is centred on the stem of nb (the tree with a stem) and every cell of the
+        merged crown has to be inside it."""
+        S = info[nb]; A = S if S["top"] >= info[t]["top"] else info[t]
+        c = np.fromiter(info[t]["r"].keys(), np.int64)
+        if A is not S:
+            c = np.r_[c, np.fromiter(A["r"].keys(), np.int64)]
+        px = x0 + (c // H + 0.5) * res; py = y0 + (c % H + 0.5) * res
+        return float(np.hypot(px - S["sx"], py - S["sy"]).max()) <= crown_k * A["top"] + crown_c
+
+    def wide(t, nb):
+        """True when the wide-crown rule applies to piece t next to nb."""
+        N = info[nb]
+        if wide_crown <= 0 or info[t]["low"] or not N["stem"] or "sx" not in N:
+            return False
+        return float(np.sqrt(4 * area(nb) / np.pi)) >= wide_crown * N["top"]
+
+    def mkdisk(r):
+        kr = max(1, int(round(r / res)))
+        return [(di, dj) for di in range(-kr, kr + 1) for dj in range(-kr, kr + 1) if di * di + dj * dj <= kr * kr]
+    disk, wdisk = mkdisk(apex_r), mkdisk(wide_apex_r)
+    def near_top(t, nb, dk):
+        """(highest canopy of nb within the disk dk around t's top, canopy of nb right above t's top)"""
         A = info[t]; i0 = int((A["tx"] - x0) / res); j0 = int((A["ty"] - y0) / res); rb = info[nb]["r"]; v = -1.0
-        for di, dj in disk:
+        for di, dj in dk:
             v = max(v, rb.get((i0 + di) * H + j0 + dj, -1.0))
         return v, rb.get(i0 * H + j0, -1.0)
 
@@ -155,7 +199,9 @@ def merge_oversegments(x, y, h, ids, res=0.25, voxel=0.5, min_contact=5, min_are
         log.append(dict(piece=b, into=a, rule=why, piece_top_m=round(info[b]["top"], 2),
                         piece_area_m2=round(area(b), 1), x=round(info[b]["tx"], 2), y=round(info[b]["ty"], 2)))
         parent[b] = a; A, B = info[a], info[b]
-        A["n"] += B["n"]; A["stem"] = A["stem"] or B["stem"]
+        if B["stem"] and not A["stem"] and "sx" in B:
+            A["sx"], A["sy"] = B["sx"], B["sy"]
+        A["n"] += B["n"]; A["low"] += B["low"]; A["stem"] = A["stem"] or B["stem"]
         for c, v in B["r"].items():
             if v > A["r"].get(c, -1.0): A["r"][c] = v
         for nb, cc in contact.pop(b, {}).items():
@@ -176,11 +222,16 @@ def merge_oversegments(x, y, h, ids, res=0.25, voxel=0.5, min_contact=5, min_are
             best = None
             for nb in contact[t]:
                 if both_stems(t, nb): continue
-                v, above = near_top(t, nb)
+                w = wide(t, nb)
+                v, above = near_top(t, nb, wdisk if w else disk)
                 if above > info[t]["top"] + apex_dz: continue       # t's top is under nb's crown: a tree below
-                if v >= info[t]["top"] - apex_dz and (best is None or v > best[0]): best = (v, nb)
-            if best and fits(best[1], t) and area(t) <= max_piece_frac * area(best[1]):
-                union(best[1], t, "no own top"); changed = True
+                if v >= info[t]["top"] - apex_dz and (best is None or v > best[0]): best = (v, nb, w)
+            if not best or area(t) > max_piece_frac * area(best[1]): continue
+            nb, w = best[1], best[2]
+            if fits(nb, t) and (not w or near_top(t, nb, disk)[0] >= info[t]["top"] - apex_dz):
+                union(nb, t, "no own top"); changed = True                  # what the rule did before "wide crown"
+            elif w and (fits(nb, t) or fits_stem(nb, t)):
+                union(nb, t, "wide crown"); changed = True
         # small fragments without a stem, smallest first, into the touching neighbour with most contact
         for t in sorted(contact, key=lambda t: info[t]["n"]):
             if find(t) != t or not contact.get(t) or info[t]["stem"] or area(t) >= min_area: continue
@@ -265,8 +316,9 @@ def process(path, a):
           f"{len(np.unique(raw[raw > 0]))} trees")
     new, log, st = merge_oversegments(cloud.x, cloud.y, cloud.h, raw, min_area=a.min_area, apex_r=a.apex_r,
                                       apex_dz=a.apex_dz, crown_k=a.crown_k, crown_c=a.crown_c,
-                                      max_piece_frac=a.max_piece_frac, min_top=a.min_top)
-    rules = {r: sum(1 for g in log if g["rule"] == r) for r in ("no own top", "fragment")}
+                                      max_piece_frac=a.max_piece_frac, min_top=a.min_top,
+                                      wide_crown=a.wide_crown, wide_apex_r=a.wide_apex_r)
+    rules = {r: sum(1 for g in log if g["rule"] == r) for r in ("no own top", "wide crown", "fragment")}
     print(f"  merged into {len(np.unique(new[new > 0]))} trees  ({rules}; "
           f"{st['stem_share']:.0%} of the pieces taller than 5 m show a stem; {st['dropped_low']} trees lower "
           f"than {a.min_top:g} m dropped)")
@@ -309,6 +361,10 @@ def main():
                     "this fraction of the neighbour's crown area (default 0.4; larger merges more, 1000 = no limit)")
     ap.add_argument("--min-top", type=float, default=3.0, help="drop trees whose top is lower than this after "
                     "merging (m, default 3; 0 keeps every tree)")
+    ap.add_argument("--wide-crown", type=float, default=0.5, help="wide-crown rule for stemless pieces next to a tree "
+                    "with a stem whose crown is at least this times as wide as the tree is tall (default 0.5; 0 = off)")
+    ap.add_argument("--wide-apex-r", type=float, default=2.0, help="how far the wide-crown rule looks around a "
+                    "piece's top (m, default 2.0)")
     ap.add_argument("--no-figure", action="store_true")
     ap.add_argument("--out-dir", help="write <out-dir>/<name>.laz (same name as the input) instead of <name>_merged.laz "
                     "next to the input; used by the benchmark to merge every plot on its own")

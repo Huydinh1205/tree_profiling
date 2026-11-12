@@ -78,6 +78,9 @@ class Results:
         return self.project_path.parent
 
 
+MACHINE_FRESH = 30            # seconds: Home asks Docker and the graphics card again after this
+
+
 class AppState:
     def __init__(self, home=None, *, runner_config: Optional[RunnerConfig] = None, autostart: bool = True,
                  machine_runner: Optional[Callable] = None):
@@ -277,8 +280,8 @@ class AppState:
 
     # ------------------------------------------------------------------ checks
     def machine(self, refresh: bool = False) -> list:
-        """HOME-3 (kept for a minute, because asking Docker takes a moment)."""
-        if refresh or self._machine is None or time.time() - self._machine_at > 60:
+        """HOME-3 (kept for MACHINE_FRESH seconds, because asking Docker takes a moment)."""
+        if refresh or self._machine is None or time.time() - self._machine_at > MACHINE_FRESH:
             kw = {"run": self._machine_runner} if self._machine_runner else {}
             self._machine = checks.machine_checks(runs_root=self.settings.runs_root,
                                                   shared_root=self.settings.shared_root,
