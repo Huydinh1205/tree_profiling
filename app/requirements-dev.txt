@@ -1,3 +1,4 @@
-# Only for the window tests (python -m pytest tests_gui). The app itself needs requirements.txt only.
-pytest>=8
+# Only for running the window tests (python -m pytest tests_gui). The app itself does not need these.
+# pytest 9.2 does not start on Python 3.10.0 (a fault in that first 3.10 release), so stay below it.
+pytest>=8,<9.2
 pytest-qt>=4.4

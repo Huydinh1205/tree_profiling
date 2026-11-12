@@ -247,14 +247,30 @@ def server_name() -> str:
     return os.environ.get("TREEPROF_INSTANCE") or "treeprof-" + re.sub(r"[^A-Za-z0-9]", "_", getpass.getuser() or "user")
 
 
-def send_to_running(message: dict, name: Optional[str] = None, timeout_ms: int = 800) -> bool:
-    """Hand a message to the copy of the app that is already open. False when there is none."""
+ACK = b"ok\n"
+
+
+def send_to_running(message: dict, name: Optional[str] = None, timeout_ms: int = 800, answer_ms: int = 5000) -> bool:
+    """Hand a message to the copy of the app that is already open. False when there is none.
+    The connection is kept open until the app answers that it has the message: closing it right after
+    writing can lose the message on Windows when the app is busy at that moment."""
     sock = QLocalSocket()
     sock.connectToServer(name or server_name())
     if not sock.waitForConnected(timeout_ms):
         return False
-    sock.write(json.dumps(message).encode("utf-8"))
+    sock.write(json.dumps(message).encode("utf-8") + b"\n")
+    sock.flush()
     sock.waitForBytesWritten(timeout_ms)
+    sock.waitForReadyRead(answer_ms)                             # the app is open either way; this only waits for "ok"
+    sock.disconnectFromServer()
+    return True
+
+
+def _someone_listens(name: str, timeout_ms: int = 300) -> bool:
+    sock = QLocalSocket()
+    sock.connectToServer(name)
+    if not sock.waitForConnected(timeout_ms):
+        return False
     sock.disconnectFromServer()
     return True
 
@@ -268,25 +284,39 @@ class InstanceServer(QObject):
         self.name = name or server_name()
         self.server = QLocalServer(self)
         self.server.newConnection.connect(self._connected)
-        if not self.server.listen(self.name):                    # a stale name left by a crash
+        self.listening = False
+        if _someone_listens(self.name):                          # another copy has the name: leave it alone
+            return
+        self.listening = self.server.listen(self.name)
+        if not self.listening:                                   # a stale name left by a crash
             QLocalServer.removeServer(self.name)
-            self.server.listen(self.name)
+            self.listening = self.server.listen(self.name)
 
     def _connected(self) -> None:
-        sock = self.server.nextPendingConnection()
-        if sock is None:
-            return
+        while self.server.hasPendingConnections():
+            self._serve(self.server.nextPendingConnection())
 
-        def read():
+    def _serve(self, sock) -> None:
+        """One message per connection: a line of JSON. Answer "ok", then pass the message on."""
+        buffer = bytearray()
+
+        def read() -> None:
+            buffer.extend(bytes(sock.readAll()))
+            if b"\n" not in buffer:
+                return
+            text = bytes(buffer).partition(b"\n")[0]
+            buffer.clear()
             try:
-                message = json.loads(bytes(sock.readAll()).decode("utf-8") or "{}")
+                message = json.loads(text.decode("utf-8") or "{}")
             except ValueError:
                 message = {}
+            sock.write(ACK)
+            sock.flush()
             self.received.emit(message if isinstance(message, dict) else {})
+        sock.readyRead.connect(read)
+        sock.disconnected.connect(sock.deleteLater)
         if sock.bytesAvailable():
             read()
-        else:
-            sock.readyRead.connect(read)
 
     def close(self) -> None:
         self.server.close()

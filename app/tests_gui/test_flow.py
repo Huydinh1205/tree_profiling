@@ -395,7 +395,28 @@ def test_dropped_files_go_where_they_belong(make):                              
     assert "Drop a .las or .laz point cloud" in h.win.last_notice and isinstance(h.win.page, HomePage)
 
 
+CLIENT = ("import json, sys, time; from PySide6.QtCore import QCoreApplication; app = QCoreApplication([]); "
+          "from treeprof_app.gui.main import send_to_running; start = time.perf_counter(); "
+          "ok = send_to_running(json.loads(sys.argv[1]), sys.argv[2]); "
+          "print(json.dumps({'ok': ok, 'seconds': time.perf_counter() - start}))")
+
+
+def _second_start(message, name):
+    """What a second start of the app does: another process hands over a message."""
+    import os
+    import subprocess
+    import sys
+    env = {k: v for k, v in os.environ.items() if not k.startswith("PYTEST_")}
+    return subprocess.Popen([sys.executable, "-c", CLIENT, json.dumps(message), name], env=env, stdout=subprocess.PIPE,
+                            text=True, cwd=str(Path(gui_main.__file__).resolve().parents[2]))
+
+
+def _answer(proc) -> dict:
+    return json.loads(proc.communicate(timeout=30)[0].strip().splitlines()[-1])
+
+
 def test_second_start_hands_its_file_to_the_open_app(make, qtbot):              # SYS-1
+    import time
     h = make()
     name = f"treeprof-test-{h.tmp.name}"
     assert gui_main.send_to_running({"open": "x"}, name) is False  # nothing is open under that name
@@ -403,15 +424,33 @@ def test_second_start_hands_its_file_to_the_open_app(make, qtbot):              
     got = []
     server.received.connect(got.append)
     try:
-        assert gui_main.send_to_running({"open": str(h.input)}, name) is True
-        qtbot.waitUntil(lambda: bool(got), timeout=5000)
-        assert got == [{"open": str(h.input)}]
+        proc = _second_start({"open": str(h.input)}, name)
+        qtbot.waitUntil(lambda: bool(got) and proc.poll() is not None, timeout=30_000)
+        answer = _answer(proc)
+        assert got == [{"open": str(h.input)}] and answer["ok"] is True
+        assert answer["seconds"] < 2.5, answer                     # answered at once, not after the waiting time
+
+        # the app is busy for a moment (drawing a big site): the message waits, it is not lost
+        proc = _second_start({"open": "second.treeprof"}, name)
+        time.sleep(3.0)                                            # nothing is handled meanwhile
+        assert proc.poll() is None                                 # the second start is still waiting for the answer
+        qtbot.waitUntil(lambda: len(got) == 2 and proc.poll() is not None, timeout=30_000)
+        assert got[1] == {"open": "second.treeprof"} and _answer(proc)["ok"] is True
+
+        both = [_second_start({"n": i}, name) for i in range(2)]   # two at the same moment
+        qtbot.waitUntil(lambda: len(got) == 4 and all(p.poll() is not None for p in both), timeout=30_000)
+        assert sorted(m["n"] for m in got[2:]) == [0, 1] and all(_answer(p)["ok"] for p in both)
+
         second = gui_main.InstanceServer(name)                     # the name is taken: the first one keeps it
-        assert gui_main.send_to_running({"ping": True}, name) is True
+        assert server.listening and not second.listening
+        proc = _second_start({"ping": True}, name)
+        qtbot.waitUntil(lambda: len(got) == 5 and proc.poll() is not None, timeout=30_000)
+        assert got[4] == {"ping": True} and _answer(proc)["ok"] is True
         second.close()
     finally:
         server.close()
-    assert gui_main.send_to_running({"ping": True}, name) is False
+    proc = _second_start({"ping": True}, name)
+    assert _answer(proc)["ok"] is False                            # closed: nobody answers
 
 
 # ---------------------------------------------------------------------------------- closing the window (SYS-2)
