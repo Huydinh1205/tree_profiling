@@ -176,8 +176,17 @@ class SettingsPage(Page):
 
         card, lay = frame()                                                        # STO-1 to STO-5
         lay.addWidget(label("Storage on this computer", "h2"))
-        lay.addWidget(label("Results are never deleted automatically. Delete the local copy of a run when you no longer "
-                            "need it here. A saved run can still be opened from the folder you saved it in.", "muted", wrap=True))
+        self.storage_note = label("", "muted", wrap=True, name="storage_note")
+        lay.addWidget(self.storage_note)
+        self.keep = QSpinBox()                                                     # STO-6
+        self.keep.setObjectName("keep_days")
+        self.keep.setRange(0, 3650)
+        self.keep.setSpecialValueText("Never")
+        self.keep.setValue(int(s.keep_days))
+        self.keep.setFixedWidth(160)
+        self.keep.valueChanged.connect(self.set_keep)
+        lay.addLayout(row(column(label("Remove runs from this computer after (days)", "strong"), self.keep), None))
+        self.show_storage_note()
         self.storage = QVBoxLayout()
         self.storage.setSpacing(6)
         self.storage.addWidget(label("Adding up...", "muted"))
@@ -291,6 +300,14 @@ class SettingsPage(Page):
         setattr(s, attr, got)
         s.save()
         self.shown[attr].setText(got)
+
+    def set_keep(self, value: int) -> None:
+        self.state.settings.keep_days = int(value)
+        self.state.settings.save()
+        self.show_storage_note()
+
+    def show_storage_note(self) -> None:
+        self.storage_note.setText(present.storage_note(self.state.settings.keep_days))
 
     def set_warn(self, value: int) -> None:
         self.state.settings.warn_free_gb = int(value)

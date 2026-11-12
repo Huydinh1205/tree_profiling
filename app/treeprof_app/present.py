@@ -381,3 +381,28 @@ def storage_line(row: dict) -> tuple:
         state = STATUS.get(row["status"], (row["status"].capitalize(),))[0]
     text = f"{fmt_when(row['created_at'])} · {fmt_bytes(row['size']) or '0 bytes'} · {state}"
     return title, text, (not row["saved"] and row["status"] == st.FINISHED)
+
+
+def removal_note(due: Optional[dt.datetime], now: Optional[dt.datetime] = None, warn_days: int = 7) -> str:
+    """STO-6: shown next to a run that was never saved, in its last week on this computer."""
+    if due is None:
+        return ""
+    now = now or dt.datetime.now().astimezone()
+    days = (due.date() - now.date()).days
+    if days > warn_days:
+        return ""
+    if days <= 0:
+        return "Removed today"
+    return "Removed tomorrow" if days == 1 else f"Removed in {days} days"
+
+
+def storage_note(keep_days: int) -> str:
+    """STO-6: what happens to runs on this computer, above the storage list."""
+    later = "A saved run can still be opened from the folder you saved it in."
+    if not keep_days:
+        return ("Runs are never removed by themselves. Delete the local copy of a run when you no longer need it "
+                f"here. {later}")
+    days = "1 day" if keep_days == 1 else f"{keep_days} days"
+    return (f"Runs are removed from this computer {days} after they were last finished or saved, and their "
+            f"intermediate tiles once they have finished. {later} A run that was never saved is gone for good, "
+            "so save what you need.")

@@ -27,8 +27,12 @@ Things to know:
 - Closing the window while a run is going asks what to do. "Keep running in the background" hides the
   window; the run goes on and the app stays as an icon next to the clock. Click that icon to get the
   window back. Starting the app a second time also just shows the window that is already there.
-- Runs, results and the app's records are kept in `C:\TreeProfiling` (`runs`, `state`). Results are
-  never deleted automatically; Settings shows what is kept and lets you delete it.
+- Runs, results and the app's records are kept in `C:\TreeProfiling` (`runs`, `state`). The app cleans up
+  by itself (checked when it starts and every hour): the intermediate tiles of a run go as soon as it
+  finishes, and a run leaves this computer 30 days after it was last finished or saved. A saved run
+  stays on Home and opens from where it was saved; a run that was never saved is removed completely
+  (Home shows "Removed in N days" in its last week). The number of days, or "Never", is in Settings.
+  Saved results are never touched.
 - The processing scripts run with the computer's Python 3.10 (`py -3.10`), exactly as the `.bat` files
   in `processes` do. The app's own environment only holds what `requirements.txt` lists.
 - What the app prints goes to `C:\TreeProfiling\state\app.log`. "Send log" makes a zip on the Desktop

@@ -1,5 +1,6 @@
 """The app's working parts without any screen: queue worker, results, save, storage (test plan A-20,
 A-21, A-27, A-28, A-29; spec HOME, SAVE, OPEN, STO, NEW-6)."""
+import datetime as dt
 import json
 import shutil
 import sys
@@ -258,6 +259,104 @@ class OpenedRecently(Base):                                                     
         got = self.state.recent()
         self.assertEqual(len(got), self.state.RECENT_KEPT)
         self.assertTrue(got[0]["path"].endswith(f"copy {self.state.RECENT_KEPT + 4}.treeprof"))
+
+
+class AutoClean(Base):                                                              # STO-6
+    def setUp(self):
+        super().setUp()
+        self.now = dt.datetime.now().astimezone()
+
+    def age(self, run_id, days):
+        """As if the run was made, finished and saved this many days ago."""
+        with self.state.store._lock, self.state.store._db as db:
+            for column in ("created_at", "finished_at"):
+                old = self.state.store.get(run_id)[column]
+                if old:
+                    when = (dt.datetime.fromisoformat(old) - dt.timedelta(days=days)).isoformat(timespec="seconds")
+                    db.execute(f"UPDATE runs SET {column} = ? WHERE id = ?", (when, run_id))
+            for seq, saved_at in db.execute("SELECT seq, saved_at FROM saves WHERE run_id = ?", (run_id,)).fetchall():
+                when = (dt.datetime.fromisoformat(saved_at) - dt.timedelta(days=days)).isoformat(timespec="seconds")
+                db.execute("UPDATE saves SET saved_at = ? WHERE seq = ?", (when, seq))
+
+    def save(self, run_id, name="Out"):
+        res = self.state.open_results(self.state.project_path_for(run_id))
+        return self.state.save(res, self.job / "Project", name, saving.default_selection(), site="Test Site",
+                               run_id=run_id)
+
+    def test_tiles_go_at_once_the_results_stay(self):
+        run = self.finished()
+        done = self.state.auto_clean()
+        self.assertGreater(done["tiles"], 0)
+        self.assertEqual(list(Path(run["workdir"]).glob("sat_result_tiles_*")), [])
+        self.assertEqual((done["local"], done["removed"]), ([], []))
+        self.assertEqual(len(self.state.open_results(self.state.project_path_for(run["id"])).trees), 4)
+
+    def test_a_run_never_saved_is_removed_completely_after_30_days(self):
+        run = self.finished()
+        self.assertEqual(self.state.settings.keep_days, 30)
+        self.age(run["id"], 29)
+        self.assertEqual(self.state.auto_clean()["removed"], [])
+        self.age(run["id"], 1)
+        self.assertEqual(self.state.auto_clean()["removed"], [run["id"]])
+        self.assertFalse(Path(run["workdir"]).exists())
+        self.assertEqual(self.state.runs(), [])
+
+    def test_a_saved_run_only_leaves_this_computer(self):
+        run = self.finished()
+        project = self.save(run["id"])
+        self.age(run["id"], 30)
+        self.assertEqual(self.state.auto_clean()["local"], [run["id"]])
+        view = self.state.run_view(run["id"])
+        self.assertEqual((view["local_exists"], view["saved"]), (False, True))   # still on Home
+        self.assertEqual(self.state.project_path_for(run["id"]), project)       # opens from where it was saved
+        self.assertEqual(len(self.state.open_results(project).trees), 4)
+        self.assertTrue(project.is_file())
+        self.assertEqual(self.state.auto_clean()["local"], [])                  # nothing left to do
+
+    def test_saving_late_counts_from_the_save(self):
+        run = self.finished()
+        self.age(run["id"], 40)                                       # finished long ago, saved today
+        self.save(run["id"])
+        self.assertEqual(self.state.auto_clean()["local"], [])
+        due = self.state.removal_date(run["id"])
+        self.assertAlmostEqual((due - self.now).total_seconds() / 86400, 30, delta=0.1)
+        self.assertEqual(self.state.auto_clean(now=due)["local"], [run["id"]])
+
+    def test_failed_and_cancelled_runs_go_too(self):
+        self.fake(fail={"join": "error"})
+        failed = self.wait(self.add(), "failed")
+        self.age(failed["id"], 30)
+        self.assertEqual(self.state.auto_clean()["removed"], [failed["id"]])
+
+    def test_queued_running_or_on_screen_is_never_touched(self):
+        self.fake(tiles=3, tile_seconds=1.0)
+        going = self.add()
+        waiting = self.add()
+        self.wait(going, "running")
+        self.age(going, 60)
+        self.age(waiting, 60)
+        self.assertEqual(self.state.auto_clean(), {"tiles": 0, "local": [], "removed": []})
+        self.assertTrue(Path(self.state.store.get(going)["workdir"]).exists())
+        self.state.cancel(going)
+        self.state.cancel(waiting)
+        self.wait(going, "cancelled")
+        self.age(going, 60)
+        self.age(waiting, 60)                                          # taking it out of the queue counts as its last use
+        self.assertEqual(self.state.auto_clean(skip={going})["removed"], [waiting])
+        self.assertEqual(self.state.auto_clean()["removed"], [going])
+
+    def test_never(self):
+        run = self.finished()
+        self.state.settings.keep_days = 0
+        self.age(run["id"], 3000)
+        self.assertEqual(self.state.auto_clean(), {"tiles": 0, "local": [], "removed": []})
+        self.assertIsNone(self.state.removal_date(run["id"]))
+        self.assertTrue(Path(run["workdir"]).exists())
+
+    def test_the_setting_is_kept(self):
+        self.state.settings.keep_days = 7
+        self.state.settings.save()
+        self.assertEqual(self.new_state().settings.keep_days, 7)
 
 
 class Checks(Base):

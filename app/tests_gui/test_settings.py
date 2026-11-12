@@ -5,6 +5,7 @@ from pathlib import Path
 
 from treeprof_app import desktop
 from treeprof_app.gui.dialogs import SettingsPage
+from treeprof_app.settings import Settings
 
 
 def settings(h) -> SettingsPage:
@@ -124,3 +125,16 @@ def test_send_log_makes_a_zip_without_results(make, monkeypatch):               
         names = z.namelist()
     assert "summary.txt" in names and any(n.startswith("log/") for n in names)
     assert not any(n.endswith((".laz", ".las", ".csv", ".shp")) for n in names)
+
+
+def test_how_long_runs_stay_on_this_computer(make):                             # STO-6
+    h = make()
+    settings(h)
+    keep = h.find("keep_days")
+    assert keep.value() == 30
+    assert "30 days after" in h.text("storage_note")
+    keep.setValue(0)
+    assert keep.text() == "Never" and h.state.settings.keep_days == 0
+    assert h.text("storage_note").startswith("Runs are never removed by themselves")
+    keep.setValue(7)
+    assert Settings.load(h.state.home).keep_days == 7

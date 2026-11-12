@@ -478,6 +478,55 @@ class AppState:
             return
         shutil.rmtree(run["workdir"], ignore_errors=True)
 
+    # ------------------------------------------------------------------ STO-6: cleaning up by itself
+    def last_used(self, run_id: str) -> Optional[dt.datetime]:
+        """When the run was last worked on: made, finished or saved, whichever is latest."""
+        run = self.store.get(run_id)
+        stamps = [run.get("created_at"), run.get("finished_at")] + [s["saved_at"] for s in self.store.saves(run_id)]
+        return max((t for t in map(_when, stamps) if t is not None), default=None)
+
+    def removal_date(self, run_id: str) -> Optional[dt.datetime]:
+        """When auto_clean will take this run off the computer (None: never, or not while it is going)."""
+        days = int(self.settings.keep_days or 0)
+        run = self.store.get(run_id)
+        last = self.last_used(run_id)
+        if days <= 0 or run["status"] not in CLEANABLE or last is None:
+            return None
+        return last + dt.timedelta(days=days)
+
+    def auto_clean(self, now: Optional[dt.datetime] = None, skip=()) -> dict:
+        """STO-6. Tiles of finished runs go at once (only a resume needs them). keep_days after its last use a run
+        leaves this computer: a saved run keeps its record and opens from where it was saved; a run that was never
+        saved is removed completely. A run that is queued, running, or open on screen (skip) is never touched."""
+        done = {"tiles": 0, "local": [], "removed": []}
+        days = int(self.settings.keep_days or 0)
+        if days <= 0:
+            return done
+        now = now or dt.datetime.now().astimezone()
+        for run in self.store.list_runs():
+            run_id = run["id"]
+            if run_id in skip or run["status"] not in CLEANABLE:
+                continue
+            try:
+                if run["status"] == st.FINISHED:
+                    done["tiles"] += self.delete_tiles(run_id)
+                due = self.removal_date(run_id)
+                if due is None or now < due or self.store.get(run_id)["status"] not in CLEANABLE:
+                    continue
+                if self.store.saves(run_id):
+                    if Path(run["workdir"]).is_dir():
+                        shutil.rmtree(run["workdir"], ignore_errors=True)
+                        done["local"].append(run_id)
+                else:
+                    self.delete_run(run_id)
+                    done["removed"].append(run_id)
+            except Exception as e:                                # one run that cannot be cleaned stops nothing
+                print(f"Could not clean up run {run_id}: {e}", flush=True)
+        if done["local"] or done["removed"] or done["tiles"]:
+            print(f"Cleaned up: {len(done['local'])} saved runs taken off this computer, "
+                  f"{len(done['removed'])} unsaved runs removed, {done['tiles'] / 1024 ** 3:.1f} GB of tiles", flush=True)
+        return done
+
     def delete_tiles(self, run_id: str) -> int:
         """STO-5: remove the intermediate tiles of a finished run. Returns the bytes freed."""
         run = self.store.get(run_id)
@@ -487,6 +536,17 @@ class AppState:
                 freed += _folder_size(folder)
                 shutil.rmtree(folder, ignore_errors=True)
         return freed
+
+
+CLEANABLE = (st.FINISHED, st.FAILED, st.CANCELLED, st.INTERRUPTED)
+
+
+def _when(stamp) -> Optional[dt.datetime]:
+    try:
+        d = dt.datetime.fromisoformat(stamp)
+    except (TypeError, ValueError):
+        return None
+    return d if d.tzinfo else d.astimezone()
 
 
 def _is_workdir(folder: Path) -> bool:

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Optional
 
 DEFAULT_WARN_GB = 100
+DEFAULT_KEEP_DAYS = 30
 CLOUDCOMPARE_GUESSES = (r"C:\Program Files\CloudCompare\CloudCompare.exe",
                         r"C:\Program Files (x86)\CloudCompare\CloudCompare.exe")
 
@@ -42,6 +43,7 @@ class Settings:
     runs_root: str = ""                      # SET-1
     shared_root: str = ""                    # SET-2: folder opened first when browsing
     warn_free_gb: int = DEFAULT_WARN_GB      # SET-3
+    keep_days: int = DEFAULT_KEEP_DAYS       # STO-6: runs leave this computer this many days after last use; 0 = never
     cloudcompare: str = ""                   # SET-4
     scripts_dir: str = ""
     script_python: list = field(default_factory=list)

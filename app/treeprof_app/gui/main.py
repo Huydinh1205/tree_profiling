@@ -7,6 +7,7 @@ import json
 import os
 import re
 import sys
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -45,6 +46,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1100, 700)
         self.setAcceptDrops(True)
         self.last_notice, self.quitting, self.page = "", False, None
+        self.cleaned_at, self.cleaning = 0.0, False
 
         root = QWidget()
         self.setCentralWidget(root)
@@ -139,9 +141,13 @@ class MainWindow(QMainWindow):
         self.notify(f"Log saved as {path}. Send this file to Ryan.", "ok")
 
     # ------------------------------------------------------------------ every second
+    CLEAN_EVERY = 3600                                            # seconds (STO-6)
+
     def tick(self) -> None:
         if self.state.closed:
             return
+        if time.time() - self.cleaned_at > self.CLEAN_EVERY and not self.cleaning:
+            self.clean_up()
         for r in self.state.store.list_runs():
             before = self.statuses.get(r["id"])
             if before == st.RUNNING and r["status"] in (st.FINISHED, st.FAILED) and self.tray and not self.isVisible():
@@ -153,6 +159,17 @@ class MainWindow(QMainWindow):
                 self.page.tick()
             except RuntimeError:
                 pass
+
+    def clean_up(self) -> None:
+        """STO-6, off the main thread (deleting a big folder takes a moment). Not the run that is on screen."""
+        self.cleaning, self.cleaned_at = True, time.time()
+        showing = {getattr(self.page, "run_id", None)}
+
+        def done(result, error) -> None:
+            self.cleaning = False
+            if error is None and (result["local"] or result["removed"]) and hasattr(self.page, "seen"):
+                self.page.seen = None                                # Home draws its list again
+        self.bg.run(lambda: self.state.auto_clean(skip=showing), done)
 
     # ------------------------------------------------------------------ files handed to the app
     def handle_paths(self, paths: list) -> None:

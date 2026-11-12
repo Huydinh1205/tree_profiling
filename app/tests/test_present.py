@@ -234,3 +234,18 @@ class SaveAndStorage(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RemovalNote(unittest.TestCase):                                             # STO-6
+    def test_only_in_the_last_week(self):
+        now = dt.datetime(2026, 11, 12, 12, 0).astimezone()
+        note = lambda days: present.removal_note(now + dt.timedelta(days=days), now)
+        self.assertEqual([note(d) for d in (30, 8, 7, 2, 1, 0, -3)],
+                         ["", "", "Removed in 7 days", "Removed in 2 days", "Removed tomorrow", "Removed today",
+                          "Removed today"])
+        self.assertEqual(present.removal_note(None, now), "")
+
+    def test_the_storage_page_says_what_happens(self):
+        self.assertIn("removed from this computer 30 days after", present.storage_note(30))
+        self.assertIn("1 day after", present.storage_note(1))
+        self.assertTrue(present.storage_note(0).startswith("Runs are never removed by themselves"))

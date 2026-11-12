@@ -178,6 +178,10 @@ class HomePage(Page):
             out.append(button("Resume", lambda: self.act(self.state.resume, rid)))
         elif status == st.FAILED:
             out.append(button("Try again", lambda: self.act(self.state.resume, rid)))
+        if not r["saved"]:                                           # STO-6: the last week before it goes
+            note = present.removal_note(self.state.removal_date(rid))
+            if note:
+                out.append(label(note, "muted", name=f"removal_{rid}"))
         return row(*out, None, spacing=8)
 
     # ---- HOME-5

@@ -68,6 +68,49 @@ def test_check_again_shows_that_it_is_checking(make):                          #
     assert h.find("check_again").text() == "Check again" and h.find("check_again").isEnabled()
 
 
+def _age(h, run_id, days):
+    import datetime as dt
+    with h.state.store._lock, h.state.store._db as db:
+        for column in ("created_at", "finished_at"):
+            old = h.state.store.get(run_id)[column]
+            when = (dt.datetime.fromisoformat(old) - dt.timedelta(days=days)).isoformat(timespec="seconds")
+            db.execute(f"UPDATE runs SET {column} = ? WHERE id = ?", (when, run_id))
+
+
+def test_home_says_when_an_unsaved_run_will_be_removed(make):                  # STO-6
+    h = make()
+    unsaved, saved = h.finished(), h.finished(site="Other Site")
+    h.save(saved)
+    h.win.go_home()
+    assert not h.has(f"removal_{unsaved}")                         # not in its first three weeks
+    _age(h, unsaved, 25)
+    _age(h, saved, 25)
+    h.win.go_home()
+    assert h.text(f"removal_{unsaved}") == "Removed in 5 days"
+    assert not h.has(f"removal_{saved}")                           # nothing is lost when it leaves this computer
+
+
+def test_the_window_cleans_up_by_itself_but_not_what_is_on_screen(make):        # STO-6
+    h = make()
+    old, shown = h.finished(), h.finished(site="Other Site")
+    _age(h, old, 31)
+    _age(h, shown, 31)
+    h.win.go_run(shown)
+    h.win.cleaned_at = 0                                           # an hour has gone by
+    h.tick()
+    h.settle()
+    assert old not in [r["id"] for r in h.state.runs()]
+    assert shown in [r["id"] for r in h.state.runs()]              # its results are open: left alone
+    h.win.go_home()
+    h.win.cleaned_at = 0
+    h.tick()
+    h.settle()
+    h.tick()
+    assert h.state.runs() == [] and h.sees("No runs yet")
+    h.tick()
+    assert h.win.bg.running == 0                                   # not again within the hour
+
+
 def test_a_run_cut_off_by_a_restart_can_be_resumed(make):                       # SYS-5
     h = make(tiles=3, tile_seconds=1.0)
     run_id = h.add()
