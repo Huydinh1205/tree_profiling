@@ -9,6 +9,7 @@ REM in that dataset are already cut out one by one, so only the measuring is che
 REM
 REM The first run downloads about 1 GB (only the single-tree drone point clouds of the 6 plots with field
 REM measurements) into ..\data\Weiser2022. Later runs only download what is missing.
+REM When it is done, report.html (charts and tables) opens in the browser.
 REM
 REM From a command window you can give plots, e.g.   validate_field.bat KA10        (14 trees, quick try)
 REM                                                  validate_field.bat --no-download
@@ -30,8 +31,9 @@ echo.
 if errorlevel 1 goto failed
 
 echo.
-echo Done. One row per tree is in data\Weiser2022\validation.csv
-if exist "..\data\Weiser2022\validation.csv" explorer /select,"%~dp0..\data\Weiser2022\validation.csv"
+echo Done. The report opens in your browser: data\Weiser2022\report.html
+echo One row per tree is in data\Weiser2022\validation.csv
+if exist "..\data\Weiser2022\report.html" start "" "%~dp0..\data\Weiser2022\report.html"
 pause
 exit /b 0
 

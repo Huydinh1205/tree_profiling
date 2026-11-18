@@ -17,6 +17,13 @@ Takes a segmentation result that already has one tree ID per point (SegmentAnyTr
   <name>_crowns.shp   crown outlines (polygon at the tree's top height), opens in CloudCompare and QGIS.
                       Trees completely under another crown have no outline (the outline is the crown seen
                       from above) but their points still carry all the numbers.
+                      The attribute table has every measured column of _trees.csv; a shapefile column name
+                      has at most 10 characters, so the long ones are shortened (SHP_FIELDS below):
+                        crown_d_m = crown_diam_m, area_m2 = crown_area_m2, volume_m3 = crown_volume_m3,
+                        crown_wmax = crown_width_max_m, foliage_v = foliage_volume_m3,
+                        crown_base = crown_base_m, crown_dep = crown_depth_m, canopy_pct = canopy_density_pct,
+                        nn_dist_m = nn_spacing_m, height_sd = height_sd_m, pts_m2 = point_density_m2
+                      (the empty columns for later work are left out until they hold data).
 
 In CloudCompare: open <name>_info.laz (keep all extra fields ticked), pick the "Point picking" tool
 (Tools > Point picking, or the "i" icon), click a tree. The label shows the value of the scalar field
@@ -131,6 +138,18 @@ def write_info_laz(L, ids, rows, path, crs=None):
     W.write(path)
 
 
+# crown shapefile attributes: (shapefile name, _trees.csv column). Shapefile names: 10 characters at most.
+SHP_FIELDS = [
+    ("tree_uid", "tree_uid"), ("tree_id", "tree_id"), ("height_m", "height_m"), ("crown_d_m", "crown_diam_m"),
+    ("area_m2", "crown_area_m2"), ("volume_m3", "crown_volume_m3"), ("qc_flag", "qc_flag"),
+    ("crown_wmax", "crown_width_max_m"), ("foliage_v", "foliage_volume_m3"), ("crown_base", "crown_base_m"),
+    ("crown_dep", "crown_depth_m"), ("canopy_pct", "canopy_density_pct"), ("nn_dist_m", "nn_spacing_m"),
+    ("n_points", "n_points"), ("h_p25_m", "h_p25_m"), ("h_p50_m", "h_p50_m"), ("h_p75_m", "h_p75_m"),
+    ("height_sd", "height_sd_m"), ("pts_m2", "point_density_m2"),
+    ("top_x", "top_x"), ("top_y", "top_y"), ("top_z", "top_z"),
+]
+
+
 def write_crowns(cloud, ids, rows, path, res=0.5):
     """Crown outline polygons (raster crowns at 0.5 m, as in process 2), z = tree height above ground + ground."""
     import geopandas as gpd
@@ -150,9 +169,7 @@ def write_crowns(cloud, ids, rows, path, res=0.5):
         if g is None: continue
         if g.geom_type == "MultiPolygon": g = max(g.geoms, key=lambda p: p.area)
         g = shapely.force_3d(g, r["top_z"])               # outline drawn at the tree top in 3D viewers
-        # shapefile column names: 10 characters at most
-        out.append(dict(tree_uid=r["tree_uid"], tree_id=r["tree_id"], height_m=r["height_m"], crown_d_m=r["crown_diam_m"],
-                        area_m2=r["crown_area_m2"], volume_m3=r["crown_volume_m3"], qc_flag=r["qc_flag"], geometry=g))
+        out.append({**{name: r.get(col) for name, col in SHP_FIELDS}, "geometry": g})
     if out:
         import warnings
         with warnings.catch_warnings():
