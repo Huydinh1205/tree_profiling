@@ -58,7 +58,7 @@ document (section 4.2 LiDAR metrics, section 5 data model):
 |---|---|
 | `tree_uid`, `model`, `tree_id` | e.g. `SITE1_TREE00042`, model that found it |
 | `top_x`, `top_y`, `height_m` | tree top position and height above ground |
-| `crown_base_m`, `crown_depth_m` | crown base estimate (10th percentile of point heights above 1 m) and depth |
+| `crown_base_m`, `crown_depth_m` | where the green crown starts (going down from the fullest 0.5 m layer, the lowest layer that still holds 10% of its occupied voxels and at least 3 m2; see `treeseg.crown_base_height`) and crown depth |
 | `crown_area_m2`, `crown_diam_m`, `crown_width_max_m`, `crown_elongation` | crown footprint, equivalent diameter, longest width, long/short ratio |
 | `crown_volume_m3` | geometric crown volume (3D convex hull) |
 | `foliage_volume_m3`, `canopy_density_pct` | occupied 0.5 m voxels, and their share of the crown hull |

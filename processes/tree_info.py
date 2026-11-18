@@ -11,6 +11,8 @@ Takes a segmentation result that already has one tree ID per point (SegmentAnyTr
                       and empty fields kept for later (NaN until that data exists):
                         Species_code, Species_prob, Foliage_condition, Thermal_anomaly, Confidence, Koala_value
                       Points that are not in a tree (ground, unassigned) have TreeID 0 and NaN.
+                      A tree is one cluster of points: if an ID in the input is several separate clusters, the
+                      largest keeps the ID, the others become trees of their own (4 m2 or more) or TreeID 0.
   <name>_trees.csv    one row per tree: tree_uid, location (tree top), all numbers above, the empty columns
   <name>_crowns.shp   crown outlines (polygon at the tree's top height), opens in CloudCompare and QGIS.
                       Trees completely under another crown have no outline (the outline is the crown seen
@@ -56,6 +58,27 @@ def find_id_field(L, field=None):
     if f is None:
         raise SystemExit(f"No tree ID field in this file (looked for {', '.join(ID_FIELDS)}). Fields: {names}")
     return f
+
+
+MIN_CLUSTER_M2 = 4.0          # as --min-area of merge_sat.py
+
+
+def one_cluster_per_tree(x, y, ids, res=0.5):
+    """A tree is one cluster of points. An ID made of several separate clusters (seen from above) would get a
+    crown width and volume that span the gaps between them: the largest cluster keeps the ID, a split-off cluster
+    of at least MIN_CLUSTER_M2 becomes a tree of its own, a smaller one is set to 0 (not a tree).
+    A result of merge_sat.py is already like this, so nothing changes for it.
+    Returns (ids, clusters kept as new trees, clusters left out)."""
+    out, new, _ = T.split_clusters(x, y, ids, res)
+    if not len(new):
+        return ids, 0, 0
+    m = np.isin(out, new)
+    cell = ((x[m] - x.min()) / res).astype(np.int64) * (int((y.max() - y.min()) / res) + 2) + ((y[m] - y.min()) / res).astype(np.int64)
+    u, inv = np.unique(out[m], return_inverse=True)
+    pair = np.unique(np.c_[inv.ravel(), cell], axis=0)
+    small = u[np.bincount(pair[:, 0], minlength=len(u)) * res * res < MIN_CLUSTER_M2]
+    out[np.isin(out, small)] = 0
+    return out, len(u) - len(small), len(small)
 
 
 def qc_codes(rows, x, y):
@@ -158,6 +181,10 @@ def main():
         fld = find_id_field(L, a.field)
         ids = np.asarray(L[fld]).astype(np.int64); ids[ids < 0] = 0
         print(f"  {cloud.n:,} points, tree IDs from '{fld}', ground: {cloud.ground_source}")
+        ids, kept, left_out = one_cluster_per_tree(cloud.x, cloud.y, ids)
+        if kept or left_out:
+            print(f"  some tree IDs were several separate clusters: {kept} clusters are measured as trees of their "
+                  f"own, {left_out} small ones (under {MIN_CLUSTER_M2:g} m2) are left out")
         rows = T.tree_table(cloud, ids)
         if not rows: raise SystemExit("No trees in this file (all tree IDs are 0).")
         qc_codes(rows, cloud.x, cloud.y)

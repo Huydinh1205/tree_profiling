@@ -57,6 +57,17 @@ of all 62 plots is unchanged (0.660 / 0.883 / 0.346 / 0.820), so the labelled pl
 no harm there; whether it is right on eucalypts was checked by eye on 11 trees, not scored. --wide-crown 0 turns
 it off.
 
+18/11/2026, separate clusters. SegmentAnyTree sometimes gives one ID to several clusters of points that do not
+touch (on a company survey up to 170 m apart: about 20 of 590 trees then had a crown width and a crown volume that
+spanned the gap). Before merging, every ID is cut into its clusters (treeseg.split_clusters: top view, 0.5 m
+cells, a cluster = cells that touch). The cluster with most points keeps the ID, the others are pieces like any
+other: the rules above join them to the tree they touch. A split-off cluster that joins nothing and is smaller
+than --min-area is set to 0 (loose bits); a larger one stays as a tree of its own. On the 62 labelled plots a
+split-off cluster belongs to the same labelled tree as the main cluster in 4% of the cases, also when it is only
+one empty cell away, so no gap is bridged. F1 of the 62 plots together 0.731 before and after (1,792 of 2,840
+trees matched both times; keeping every split-off cluster as a tree: 0.721), split-off clusters left in the
+result 310 -> 0. --no-split turns it off.
+
 Usage:
   python merge_sat.py "Galaxy16-[Processed Files].laz"            (several files allowed)
   python merge_sat.py result.laz --apex-r 0.5                       (merges more)
@@ -85,7 +96,7 @@ FIELDS = ["PredInstance_SAT", "PredInstance", "preds_instance_segmentation", "tr
 
 def merge_oversegments(x, y, h, ids, res=0.25, voxel=0.5, min_contact=5, min_area=4.0, apex_r=0.6, apex_dz=0.3,
                        stem_h=2.0, stem_pts=3, crown_k=0.45, crown_c=2.0, max_piece_frac=0.4, min_top=3.0,
-                       wide_crown=0.5, wide_apex_r=2.0):
+                       wide_crown=0.5, wide_apex_r=2.0, split=True):
     """Return (merged ids, log rows, stats). ids: one int per point, 0 = not a tree. h = height above ground.
 
     A piece is only merged into a neighbour it touches in 3D, never so that the merged crown leaves the circle
@@ -101,8 +112,16 @@ def merge_oversegments(x, y, h, ids, res=0.25, voxel=0.5, min_contact=5, min_are
                   wide_apex_r around the piece's top, and the crown circle may be centred on that tree's stem
                   as well as on the taller top. wide_crown 0 turns it off.
       fragment    a piece without a stem, smaller than min_area m2 (top view).
-    After merging, a tree whose top is lower than min_top m is set to 0 (stats["dropped_low"] counts them)."""
+    After merging, a tree whose top is lower than min_top m is set to 0 (stats["dropped_low"] counts them).
+
+    split: before anything else an ID whose points form several separate clusters (top view) is cut into its
+    clusters (treeseg.split_clusters); the split-off ones are pieces like any other. One that joined nothing and
+    is smaller than min_area is set to 0 at the end (stats["split"], stats["dropped_stray"])."""
     ids = ts.relabel(ids)
+    born = set()
+    if split:                                             # one ID, several separate clusters: each is a piece
+        ids, new_ids, _ = ts.split_clusters(x, y, ids)
+        born = set(new_ids.tolist())
     x0, y0 = x.min(), y.min()
     ci = ((x - x0) / res).astype(np.int64); cj = ((y - y0) / res).astype(np.int64)
     H = int(cj.max()) + 2
@@ -240,11 +259,15 @@ def merge_oversegments(x, y, h, ids, res=0.25, voxel=0.5, min_contact=5, min_are
                     union(nb, t, "fragment"); changed = True; break
 
     lut = np.zeros(int(ids.max()) + 1, np.int64)
-    low = 0
+    low = stray = 0
+    joined = {g["piece"] for g in log} | {g["into"] for g in log}
     for t in info:
         r = find(t); lut[t] = r
         if info[r]["top"] < min_top: lut[t] = 0; low += r == t
-    return ts.relabel(lut[ids]), log, dict(stem_share=share, dropped_low=int(low))
+        elif t in born and t not in joined and area(t) < min_area:        # a split-off cluster that joined nothing
+            lut[t] = 0; stray += 1
+    return ts.relabel(lut[ids]), log, dict(stem_share=share, dropped_low=int(low), split=len(born),
+                                           dropped_stray=int(stray))
 
 
 def fast_hag(x, y, z, ground, res=0.5):
@@ -317,9 +340,11 @@ def process(path, a):
     new, log, st = merge_oversegments(cloud.x, cloud.y, cloud.h, raw, min_area=a.min_area, apex_r=a.apex_r,
                                       apex_dz=a.apex_dz, crown_k=a.crown_k, crown_c=a.crown_c,
                                       max_piece_frac=a.max_piece_frac, min_top=a.min_top,
-                                      wide_crown=a.wide_crown, wide_apex_r=a.wide_apex_r)
+                                      wide_crown=a.wide_crown, wide_apex_r=a.wide_apex_r,
+                                      split=not getattr(a, "no_split", False))
     rules = {r: sum(1 for g in log if g["rule"] == r) for r in ("no own top", "wide crown", "fragment")}
-    print(f"  merged into {len(np.unique(new[new > 0]))} trees  ({rules}; "
+    print(f"  merged into {len(np.unique(new[new > 0]))} trees  ({rules}; {st['split']} separate clusters split "
+          f"off their tree, {st['dropped_stray']} of them too small to keep; "
           f"{st['stem_share']:.0%} of the pieces taller than 5 m show a stem; {st['dropped_low']} trees lower "
           f"than {a.min_top:g} m dropped)")
 
@@ -365,6 +390,8 @@ def main():
                     "with a stem whose crown is at least this times as wide as the tree is tall (default 0.5; 0 = off)")
     ap.add_argument("--wide-apex-r", type=float, default=2.0, help="how far the wide-crown rule looks around a "
                     "piece's top (m, default 2.0)")
+    ap.add_argument("--no-split", action="store_true", help="do not cut an ID made of separate clusters into "
+                    "its clusters before merging")
     ap.add_argument("--no-figure", action="store_true")
     ap.add_argument("--out-dir", help="write <out-dir>/<name>.laz (same name as the input) instead of <name>_merged.laz "
                     "next to the input; used by the benchmark to merge every plot on its own")

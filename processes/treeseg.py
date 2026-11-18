@@ -415,14 +415,104 @@ def relabel(ids):
     return new[inv.ravel()]
 
 
+def split_clusters(x, y, ids, res=0.5):
+    """Give every separate cluster of a tree an ID of its own.
+
+    Seen from above on a res m grid, the points of one tree form one patch (cells that touch by a side or a
+    corner). SegmentAnyTree sometimes gives one ID to several patches that lie metres (on a large survey more
+    than 100 m) apart. Measured as one tree, such an ID gets a crown width and a crown volume that span the gap.
+    The patch with most points keeps the ID; every other patch gets a new ID above the highest one.
+
+    Returns (ids, new_ids, parent): new_ids = the IDs given to split-off patches, parent = the ID each had.
+
+    Checked 18/11/2026 on the 62 labelled plots (FOR-instanceV2, CedarCypress3D): of 2,840 labelled trees 15
+    have a second patch at all, never more than 17 points; in SegmentAnyTree results 4% to 13% of the trees
+    have one, and a split-off patch is part of the same labelled tree as the main patch in only 4% of the
+    cases, also when it is just one empty cell (1 m) away. So no gap is bridged."""
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+    ids = np.asarray(ids).astype(np.int64)
+    none = np.zeros(0, np.int64)
+    t = np.nonzero(ids > 0)[0]
+    if not len(t):
+        return ids, none, none
+    # grid from the corner of ALL points: the same cells as the voxels of merge_sat.py, so two pieces it joined
+    # (they touch in 3D) are one patch here as well. +1: an empty rim, so that a neighbour never wraps around
+    i = ((x[t] - x.min()) / res).astype(np.int64) + 1
+    j = ((y[t] - y.min()) / res).astype(np.int64) + 1
+    H = int(j.max()) + 2; NC = (int(i.max()) + 2) * H
+    uk, inv, cnt = np.unique(ids[t] * NC + i * H + j, return_inverse=True, return_counts=True)   # (tree, cell)
+    a, b = [], []
+    for off in (1, H - 1, H, H + 1):                                      # 4 of the 8 neighbours; the rest by symmetry
+        pos = np.searchsorted(uk, uk + off); pos[pos >= len(uk)] = 0
+        hit = uk[pos] == uk + off
+        a.append(np.nonzero(hit)[0]); b.append(pos[hit])
+    a, b = np.concatenate(a), np.concatenate(b)
+    n, lab = connected_components(coo_matrix((np.ones(len(a), np.int8), (a, b)), shape=(len(uk), len(uk))), directed=False)
+    tree = np.zeros(n, np.int64); tree[lab] = uk // NC                    # the tree each patch belongs to
+    if n == len(np.unique(tree)):
+        return ids, none, none
+    pts = np.bincount(lab, weights=cnt, minlength=n)
+    o = np.lexsort((-pts, tree)); first = np.r_[True, tree[o][1:] != tree[o][:-1]]   # per tree: biggest patch first
+    new = tree.copy(); extra = o[~first]
+    new[extra] = int(ids.max()) + 1 + np.arange(len(extra))
+    out = ids.copy(); out[t] = new[lab[inv.ravel()]]
+    return out, new[extra], tree[extra]
+
+
 # --------------------------------------------------------------------------- per-tree table
+def crown_base_height(X, Y, H, voxel=0.5, frac=0.1, min_cells=12, gap=4):
+    """Height above ground where the green crown of one tree starts (X, Y, H: its points, H = height above ground).
+
+    The tree is cut into layers of voxel m. A layer is "crown" when its occupied voxels are at least frac x those
+    of the fullest layer AND at least min_cells (12 voxels = 3 m2; for a small tree: half the fullest layer), so
+    a stem with a few twigs is not crown. A layer with fewer than 3 points counts as empty, layers below 1 m are
+    never crown. From the fullest layer downwards the crown goes on as long as the layers are crown; up to gap
+    layers in a row that are not (2 m) are stepped over. The lowest crown layer reached is the crown base.
+
+    Until 18/11/2026 this was "10% of the tree's points above 1 m are lower". That follows where the drone points
+    are, not where the branches start. Checked on two sets (error = this - reference, bias / median error):
+      745 trees measured in the field, tall closed forest (Weiser et al. 2022, validate_field.py), lowest living
+      branch:            old rule +4.5 / 3.9 m     this rule -0.5 / 1.8 m
+      (same trees, lowest branch of 1 m or longer, dead ones too: old +7.0 / 6.4 m, this +1.9 / 1.7 m)
+      199 labelled eucalypts, 5 to 17 m (FOR-instance RMIT, lowest point labelled "live branches"):
+                         old rule -0.4 / 0.85 m    this rule -0.8 / 0.63 m
+    and on the same trees damaged the way a wrong segmentation damages them (median error, old -> this):
+      field trees thinned to 100 points per m2 3.9 -> 2.0 m, to 30 points per m2 3.9 -> 3.0 m, the neighbours'
+      points inside the footprint added 4.9 -> 3.0 m, merged with the nearest tree 4.6 -> 3.0 m, a third of the
+      crown cut off 4.0 -> 2.0 m, loose low points under the crown 3.4 -> 2.6 m; eucalypts thinned to 100 points
+      per m2 0.92 -> 0.59 m.
+    With few points the base moves up, with foreign points under the crown it moves down.
+    Without min_cells the rule was 2.4 m off on the eucalypts (their stems counted as crown); rules on the width
+    of a layer instead of its voxels dropped 3 to 5 m as soon as a few low points were added."""
+    k = np.floor(H / voxel).astype(np.int64)
+    k0 = int(np.ceil(1.0 / voxel))                               # first layer above 1 m
+    if k.max() < k0:
+        return 0.0
+    pts = np.bincount(k)
+    cells = np.unique(np.c_[k, np.floor(X / voxel).astype(np.int64), np.floor(Y / voxel).astype(np.int64)], axis=0)
+    n = np.bincount(cells[:, 0], minlength=len(pts)); n[pts < 3] = 0; n[:k0] = 0
+    if n.max() == 0:
+        return 0.0
+    top = int(np.argmax(n)); crown = n >= max(frac * n[top], min(min_cells, 0.5 * n[top]))
+    base, miss, j = top, 0, top
+    while j > k0:
+        j -= 1
+        if crown[j]: base, miss = j, 0
+        else:
+            miss += 1
+            if miss > gap: break
+    return float(base * voxel)
+
+
 def tree_table(cloud: Cloud, ids, res=0.5, voxel=0.5):
     """One row per tree with the LiDAR structural profile of the pilot document (section 4.2).
 
     Measured from the points assigned to each tree (heights = above ground):
       top_x, top_y, height_m     highest point of the tree
-      crown_base_m               crown-base estimate: 10th percentile height of the tree's points
-                                 above 1 m (proxy, not a field crown-base measurement)
+      crown_base_m               where the green crown starts: going down from the fullest 0.5 m layer, the lowest
+                                 layer that still holds at least 10% of its occupied voxels and at least 3 m2
+                                 (crown_base_height; checked against field crown bases)
       crown_depth_m              height_m - crown_base_m
       crown_area_m2              occupied 0.5 m cells of points above 1/3 of tree height
       crown_diam_m               diameter of a circle with that area
@@ -453,11 +543,14 @@ def tree_table(cloud: Cloud, ids, res=0.5, voxel=0.5):
     for k, (s0, e0) in enumerate(zip(starts, ends)):
         p = o[s0:e0]; tid = int(I[s0])
         X, Y, H = cloud.x[p], cloud.y[p], cloud.hag[p]
+        # measure from a corner of the tree's own (a whole number of voxels away, so the voxels stay where they
+        # are): with map-grid coordinates (x 541,000, y 6,789,000) the hull and Delaunay code below loses the
+        # decimals it needs, and canopy density came out empty for nearly every tree
+        X = X - np.floor(X.min() / voxel) * voxel; Y = Y - np.floor(Y.min() / voxel) * voxel
         top = p[-1]; h = float(cloud.hag[top])
         up = H >= h / 3
         area = np.unique(iy[p][up] * nx + ix[p][up]).size * res * res
-        hb = H[H > 1.0]
-        base = float(np.percentile(hb, 10)) if hb.size else 0.0
+        base = crown_base_height(X, Y, H, voxel)
         cr = H >= base
         xyz = np.c_[X[cr], Y[cr], H[cr]]
         hv = None                                             # crown hull corners (enough to test "inside")
