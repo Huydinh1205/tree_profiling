@@ -14,7 +14,7 @@ from typing import Optional
 FORMAT = "treeprof"
 FORMAT_VERSION = 1
 EXTENSION = ".treeprof"
-FILE_KEYS = ("trees_csv", "crowns_shp", "info_laz", "sat_merged_laz", "sat_raw_laz")
+FILE_KEYS = ("trees_csv", "crowns_shp", "info_laz", "sat_merged_laz", "sat_raw_laz", "report_html")
 REQUIRED_FILES = ("trees_csv", "crowns_shp")          # without these the results cannot be shown
 SHAPEFILE_PARTS = (".shx", ".dbf")                    # a .shp is unusable without them
 

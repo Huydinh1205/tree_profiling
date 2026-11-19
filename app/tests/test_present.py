@@ -90,7 +90,7 @@ class Running(unittest.TestCase):
 
     def test_a_stopped_run_shows_no_step_as_running(self):
         rows = present.step_rows(self.view(st.CANCELLED))
-        self.assertEqual([r["state"] for r in rows], ["done", "waiting", "waiting", "waiting", "waiting"])
+        self.assertEqual([r["state"] for r in rows], ["done", "waiting", "waiting", "waiting", "waiting", "waiting"])
 
     def test_copy_shows_bytes(self):
         v = self.view()
@@ -100,7 +100,7 @@ class Running(unittest.TestCase):
         self.assertEqual(present.step_rows(v)[0]["label"], "1.0 GB of 4.0 GB")
 
     def test_home_card_text(self):
-        self.assertEqual(present.current_step_text(self.view()), "Step 2 of 5: Find trees · Tile 2 of 3")
+        self.assertEqual(present.current_step_text(self.view()), "Step 2 of 6: Find trees · Tile 2 of 3")
         self.assertEqual(present.current_step_text({"live": None}), "")
 
     def test_failure_buttons(self):

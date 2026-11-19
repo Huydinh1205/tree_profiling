@@ -39,6 +39,7 @@ class SaveItem:
     default: bool = False            # ticked when the dialog opens
     parts_required: tuple = ()       # other extensions that belong to the file
     parts_optional: tuple = ()
+    skip_if_missing: bool = False    # a run may not have it (the report of an older run, or one that failed)
 
 
 ITEMS = (
@@ -47,6 +48,9 @@ ITEMS = (
              default=True, parts_required=(".shx", ".dbf"), parts_optional=(".prj", ".cpg")),
     SaveItem("info_laz", steps.INFO_LAZ, "_info.laz", "Coloured point cloud with tree numbers (CloudCompare, 3D view)",
              always=True, default=True),
+    SaveItem("report_html", steps.REPORT_HTML, "_report.html",
+             "Report (web page: SegmentAnyTree before and after joining crowns, trees to check)",
+             default=True, skip_if_missing=True),
     SaveItem("sat_merged_laz", steps.SAT_MERGED, "_sat_merged.laz", "Segmentation after joining crowns"),
     SaveItem("sat_raw_laz", steps.SAT_RAW, "_sat_raw.laz", "Segmentation before joining crowns"),
 )
@@ -78,6 +82,8 @@ def make_plan(workdir, folder, site: str, selected: Optional[Iterable[str]] = No
         if item.key not in chosen:
             continue
         src = workdir / item.work_name
+        if item.skip_if_missing and not src.is_file():
+            continue
         dst = folder / (stem + item.saved_suffix)
         pairs = [(src, dst)]
         pairs += [(src.with_suffix(ext), dst.with_suffix(ext)) for ext in item.parts_required]

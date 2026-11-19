@@ -256,6 +256,7 @@ def test_whole_way_from_new_run_to_saved(make):
     view = results(h)
     assert h.text("card_trees") == "7" and h.text("count") == "Showing 7 of 7 trees"
     assert h.text("saved_pill") == "!  Not saved"
+    assert "Open report" in h.buttons()                            # RES-11
     assert h.text("selected_tree", view).startswith("TEST_SITE_TREE")
     h.until(lambda: "3D view not available" in h.text("view_note", view))   # the stand-in writes no real points
 
@@ -265,13 +266,15 @@ def test_whole_way_from_new_run_to_saved(make):
     assert h.find("save_parent", dialog).text() == str(h.job / "Project")
     assert h.find("file_info_laz", dialog).isChecked() and not h.find("file_info_laz", dialog).isEnabled()
     assert not h.find("file_sat_raw_laz", dialog).isChecked()
+    assert h.find("file_report_html", dialog).isChecked()
     h.press("Save", dialog)
     h.until(lambda: dialog.step == "saved")
     assert "Double-click the .treeprof file" in h.text("saved", dialog)
     h.press("Close", dialog)
     folder = h.job / "Project" / "Test Site – 13 Feb 25 – Tree Profiling"
     names = {p.name for p in folder.iterdir()}
-    assert {"Test Site.treeprof", "Test Site_trees.csv", "Test Site_info.laz", "Test Site_crowns.shp"} <= names
+    assert {"Test Site.treeprof", "Test Site_trees.csv", "Test Site_info.laz", "Test Site_crowns.shp",
+            "Test Site_report.html"} <= names
     assert "Test Site_sat_raw.laz" not in names
     assert h.text("saved_pill") == "✓  Saved"
     assert h.text("info_saved_to", view) == str(folder)
@@ -287,7 +290,7 @@ def test_home_shows_the_run_that_is_going(make):                                
                          and h.state.current()["live"].label.startswith("Tile")))
     h.tick()
     assert h.text("current_title") == "Test Site – 13 Feb 25"
-    assert h.text("current_step").startswith("Step 2 of 5: Find trees · Tile")
+    assert h.text("current_step").startswith("Step 2 of 6: Find trees · Tile")
     h.press("View progress")
     assert isinstance(h.win.page.inner, ProgressView) and "Cancel run" in h.buttons()
     assert h.sees("You can close this window.")

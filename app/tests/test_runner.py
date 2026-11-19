@@ -75,10 +75,11 @@ class WholeRun(Base):                                                           
                          ("finished", 4, 5000, None))
         self.assertTrue(run["sha256"] and run["started_at"] and run["finished_at"])
         self.assertEqual(sorted(self.store.steps_done(run_id)), sorted(ALL_STEPS))
-        self.assertEqual(self.calls(run_id), ["find_trees", "join", "measure"])
+        self.assertEqual(self.calls(run_id), ["find_trees", "join", "measure", "report"])
         self.assertEqual([e["step"] for e in self.of_type("step", state="running")], ALL_STEPS)
         self.assertEqual([e["label"] for e in self.of_type("step", state="running")],
-                         ["Copy file", "Find trees", "Join split crowns", "Measure trees", "Prepare view"])
+                         ["Copy file", "Find trees", "Join split crowns", "Measure trees", "Write report",
+                          "Prepare view"])
         w = self.workdir(run_id)
         for name in ("find_trees.log", "join.log", "measure.log", "sat_docker.log"):
             self.assertTrue((w / "log" / name).is_file(), name)
@@ -163,6 +164,29 @@ class WholeRun(Base):                                                           
         info = self.store.steps_done(run_id)["prepare_view"]["info"]
         self.assertEqual((info["available"], "no memory" in info["reason"]), (False, True))
 
+    def test_report_is_made_and_saved_with_the_results(self):                   # RES-11
+        run_id = self.add()
+        self.assertEqual(self.runner.run(run_id), "finished")
+        w = self.workdir(run_id)
+        info = self.store.steps_done(run_id)["report"]["info"]
+        self.assertEqual(info, {"available": True, "trees_to_check": 0})
+        self.assertIn("<h2>Trees to check</h2>", (w / "report.html").read_text(encoding="utf-8"))
+        self.assertEqual(list((w / "report").glob("*/points_treeid.laz")), [])        # full-size copies removed
+        project = projectfile.read_project(self.store.get(run_id)["project_path"])
+        self.assertEqual(project["files"]["report_html"], "report.html")
+        self.assertIn("--external", next(l for l in self.calls(run_id, full=True) if l.startswith("report")))
+
+    def test_report_failure_does_not_fail_the_run(self):                         # RES-11
+        self.fake(fail={"report": "error"})
+        run_id = self.add()
+        self.assertEqual(self.runner.run(run_id), "finished")
+        info = self.store.steps_done(run_id)["report"]["info"]
+        self.assertEqual((info["available"], "no rasterio" in info["reason"]), (False, True))
+        self.assertFalse((self.workdir(run_id) / "report.html").exists())
+        project = projectfile.read_project(self.store.get(run_id)["project_path"])
+        self.assertIsNone(project["files"]["report_html"])
+        self.assertEqual(self.of_type("failure"), [])
+
     def test_a_display_problem_does_not_stop_the_run(self):
         def broken(event):
             raise RuntimeError("window closed")
@@ -213,22 +237,22 @@ class Failures(Base):                                                           
         return run_id
 
     def test_out_of_memory(self):
-        self.check("find_trees", "oom", "out_of_ram", ["find_trees", "find_trees", "join", "measure"],
+        self.check("find_trees", "oom", "out_of_ram", ["find_trees", "find_trees", "join", "measure", "report"],
                    ["retry_smaller_tiles", "show_details"])
 
     def test_crash_on_a_tile_keeps_the_finished_tiles(self):
-        run_id = self.check("find_trees", "crash", "crash", ["find_trees", "find_trees", "join", "measure"])
+        run_id = self.check("find_trees", "crash", "crash", ["find_trees", "find_trees", "join", "measure", "report"])
         self.assertEqual(self.store.steps_done(run_id)["find_trees"]["info"]["tiles_skipped"], [1])
 
     def test_docker_not_running(self):
-        self.check("find_trees", "docker", "docker_not_running", ["find_trees", "find_trees", "join", "measure"],
+        self.check("find_trees", "docker", "docker_not_running", ["find_trees", "find_trees", "join", "measure", "report"],
                    ["retry"])
 
     def test_join_fails_and_finding_trees_is_not_run_again(self):               # A-25
-        self.check("join", "error", "unknown", ["find_trees", "join", "join", "measure"])
+        self.check("join", "error", "unknown", ["find_trees", "join", "join", "measure", "report"])
 
     def test_measure_fails_and_earlier_steps_are_not_run_again(self):
-        run_id = self.check("measure", "error", "unknown", ["find_trees", "join", "measure", "measure"])
+        run_id = self.check("measure", "error", "unknown", ["find_trees", "join", "measure", "measure", "report"])
         self.assertIn("Measure trees", self.of_type("failure")[0]["message"])
         self.assertTrue(self.store.get(run_id)["project_path"])
 
@@ -311,7 +335,7 @@ class Cancel(Base):                                                             
         self.runner.resume(run_id)
         self.assertEqual(self.runner.run(run_id), "finished")
         self.assertEqual(self.store.steps_done(run_id)["find_trees"]["info"]["tiles_skipped"], [1])
-        self.assertEqual(self.calls(run_id), ["find_trees", "find_trees", "join", "measure"])
+        self.assertEqual(self.calls(run_id), ["find_trees", "find_trees", "join", "measure", "report"])
         self.assertEqual(self.store.get(run_id)["trees"], 4)
 
     def test_cancel_during_the_copy_leaves_nothing(self):
@@ -367,7 +391,7 @@ class Interrupted(Base):                                                        
         self.fake(tiles=2)
         runner.resume(run_id)
         self.assertEqual(runner.run(run_id), "finished")
-        self.assertEqual(self.calls(run_id), ["find_trees", "join", "join", "measure"])   # find_trees only once
+        self.assertEqual(self.calls(run_id), ["find_trees", "join", "join", "measure", "report"])   # find_trees only once
         self.assertEqual(store.get(run_id)["trees"], 4)
 
 

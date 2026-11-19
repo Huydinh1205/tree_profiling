@@ -265,3 +265,9 @@ def test_colour_by_quality_check_shows_which_trees_to_look_at(make):            
     assert view.map.chosen == view.selected                        # the selection is kept
     view.colour.setCurrentIndex(0)                                 # back to height: the scale is back
     assert (h.text("legend_lo"), h.text("legend_hi")) == ("5.0", "34.0") and not h.has("legend_class_0")
+
+
+def test_open_report_only_when_there_is_one(make):                              # RES-11
+    h = make()
+    open_saved(h, 60)
+    assert "Open report" not in h.buttons()                        # results saved before the report existed

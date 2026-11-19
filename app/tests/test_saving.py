@@ -42,7 +42,8 @@ class Plan(Base):
                          ["Test Site_crowns.dbf", "Test Site_crowns.prj", "Test Site_crowns.shp",
                           "Test Site_crowns.shx", "Test Site_info.laz", "Test Site_trees.csv"])
         self.assertEqual(plan.files, {"trees_csv": "Test Site_trees.csv", "crowns_shp": "Test Site_crowns.shp",
-                                      "info_laz": "Test Site_info.laz", "sat_merged_laz": None, "sat_raw_laz": None})
+                                      "info_laz": "Test Site_info.laz", "sat_merged_laz": None, "sat_raw_laz": None,
+                                      "report_html": None})
         self.assertEqual(plan.project_path, self.dest / "Test Site.treeprof")
         self.assertEqual(plan.total_bytes, sum(s.stat().st_size for s, _ in plan.copies))
         self.assertEqual(plan.conflicts, [])

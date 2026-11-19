@@ -60,7 +60,7 @@ class Queue(Base):
         self.assertEqual((run["trees"], run["saved"], run["local_exists"]), (4, False, True))
         self.assertEqual(Path(run["workdir"]).parent, self.tmp / "home" / "runs")
         self.assertTrue(Path(run["workdir"]).name.startswith("Test_Site_"))
-        self.assertEqual(run["live"].steps, {s: "done" for s in ("copy", "find_trees", "join", "measure", "prepare_view")})
+        self.assertEqual(run["live"].steps, {s: "done" for s in ("copy", "find_trees", "join", "measure", "report", "prepare_view")})
         self.assertIn("Done in", "\n".join(self.state.log_tail(run["id"])))
 
     def test_two_runs_get_their_own_folders(self):
@@ -146,7 +146,8 @@ class ResultsAndSave(Base):
         self.assertEqual(path, self.job / "Project" / "Out" / "Test Site.treeprof")
         self.assertEqual(sorted(p.name for p in path.parent.iterdir()),
                          ["Test Site.treeprof", "Test Site_crowns.dbf", "Test Site_crowns.prj", "Test Site_crowns.shp",
-                          "Test Site_crowns.shx", "Test Site_info.laz", "Test Site_trees.csv"])
+                          "Test Site_crowns.shx", "Test Site_info.laz", "Test Site_report.html", "Test Site_trees.csv"])
+        self.assertIn("<h2>Trees to check</h2>", (path.parent / "Test Site_report.html").read_text(encoding="utf-8"))
         view = self.state.run_view(self.run["id"])
         self.assertEqual((view["saved"], view["saved_folder"]), (True, str(path.parent)))
         again = self.state.open_results(path)
@@ -159,6 +160,7 @@ class ResultsAndSave(Base):
         self.assertEqual(cm.exception.code, "conflict")
         both = self.save(on_conflict="keep_both")
         self.assertEqual(both.name, "Test Site (2).treeprof")
+        self.assertTrue((both.parent / "Test Site (2)_report.html").is_file())          # SAVE-10
         self.assertEqual(self.save(on_conflict="replace").name, "Test Site.treeprof")
         self.assertEqual(len(self.state.store.saves(self.run["id"])), 3)
 

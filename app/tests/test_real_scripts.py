@@ -54,6 +54,15 @@ class RealScripts(unittest.TestCase):
         for name in (steps.SAT_RAW, steps.SAT_MERGED, steps.INFO_LAZ, steps.TREES_CSV, steps.CROWNS_SHP):
             self.assertTrue((self.work / name).is_file(), name)
 
+    def test_1b_the_report_of_run_segmentanytree_bat_with_trees_to_check(self):    # RES-11
+        info = self.state.store.steps_done(self.run_id)["report"]["info"]
+        self.assertTrue(info["available"], info)
+        page = (self.work / steps.REPORT_HTML).read_text(encoding="utf-8")
+        for text in ("<h2>Results on this site</h2>", "<td>sat</td>", "<td>sat_merged</td>", "CHM + watershed",
+                     "<h2>Trees to check</h2>", "<h2>Figures</h2>", "data:image/png;base64,"):
+            self.assertIn(text, page)
+        self.assertEqual(list((self.work / steps.REPORT_DIR).glob("*/points_treeid.laz")), [])
+
     def test_2_the_app_reads_what_the_scripts_print(self):
         log = "\n".join(self.state.log_tail(self.run_id, 200))
         self.assertIn("merged into", log)                              # merge_sat.py

@@ -231,8 +231,18 @@ class MeasureParser:
         return False
 
 
+class NoProgress:
+    """A step whose lines are only logged (the report): the bar shows no percentage."""
+
+    def __init__(self):
+        self.info = {}
+
+    def feed(self, line: str) -> bool:
+        return False
+
+
 def parser_for(step: str):
-    return {"find_trees": SatParser, "join": MergeParser, "measure": MeasureParser}[step]()
+    return {"find_trees": SatParser, "join": MergeParser, "measure": MeasureParser}.get(step, NoProgress)()
 
 
 # ---------------------------------------------------------------------------------- failures

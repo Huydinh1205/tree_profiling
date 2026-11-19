@@ -86,6 +86,12 @@ class Commands(unittest.TestCase):                                              
         self.assertEqual(steps.command("measure", python="python", workdir=self.W, site="Test Site"),
                          ["python", "tree_info.py", str(self.W / "sat_result_merged.laz"), "--site", "Test Site"])
 
+    def test_report(self):                                                       # RES-11, as run_segmentanytree.bat
+        self.assertEqual(steps.command("report", python="python", workdir=self.W, input_path="in.laz", site="Test Site"),
+                         ["python", "process2_segment.py", "in.laz", "--out", str(self.W / "report"), "--models",
+                          "chm_watershed", "--external", f"sat={self.W / 'sat_result.laz'}",
+                          f"sat_merged={self.W / 'sat_result_merged.laz'}", "--site-name", "Test Site"])
+
     def test_other_steps_have_no_script(self):
         for step in ("copy", "prepare_view", "nonsense"):
             with self.assertRaises(ValueError):
@@ -140,7 +146,8 @@ class StepDone(Tmp):                                                            
 
     def test_labels(self):
         self.assertEqual([steps.STEP_LABELS[s] for s in steps.STEP_ORDER],
-                         ["Copy file", "Find trees", "Join split crowns", "Measure trees", "Prepare view"])
+                         ["Copy file", "Find trees", "Join split crowns", "Measure trees", "Write report",
+                          "Prepare view"])
 
 
 if __name__ == "__main__":

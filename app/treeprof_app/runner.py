@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional, Sequence, Union
 
-from . import __version__, filecopy, lasheader, projectfile, progress, steps, store as st, summary
+from . import __version__, filecopy, lasheader, projectfile, progress, report, steps, store as st, summary
 from .naming import safe_name
 from .winproc import hidden
 
@@ -197,6 +197,8 @@ class Runner:
             return self._copy(run_id)
         if step in steps.SCRIPT_STEPS:
             return self._script(run_id, step)
+        if step == "report":
+            return self._report(run_id)
         return self._prepare_view(run_id)
 
     def _copy(self, run_id: str) -> dict:
@@ -276,6 +278,19 @@ class Runner:
             raise _StepFailed(failure)
         return _parser_info(parser)
 
+    def _report(self, run_id: str) -> dict:
+        """RES-11: the report of run_segmentanytree.bat plus "Trees to check". A report that cannot be made
+        does not fail the run: only the report is missing."""
+        try:
+            self._script(run_id, "report")
+            return {"available": True, "trees_to_check": report.build(Path(self.store.get(run_id)["workdir"]))}
+        except _Cancelled:
+            raise
+        except _StepFailed as e:
+            return {"available": False, "reason": (e.failure.detail or e.failure.message)[-2000:]}
+        except Exception as e:
+            return {"available": False, "reason": f"{type(e).__name__}: {e}"}
+
     def _prepare_view(self, run_id: str) -> dict:
         """Spec 6.7. A failure here does not fail the run: only the 3D view is missing."""
         if self.config.prepare_view is None:
@@ -301,7 +316,8 @@ class Runner:
             capture_date=run["capture_date"], run_id=run_id, started_at=run["started_at"], finished_at=finished,
             machine=self.config.machine,
             files={"trees_csv": steps.TREES_CSV, "crowns_shp": steps.CROWNS_SHP, "info_laz": steps.INFO_LAZ,
-                   "sat_merged_laz": steps.SAT_MERGED, "sat_raw_laz": steps.SAT_RAW},
+                   "sat_merged_laz": steps.SAT_MERGED, "sat_raw_laz": steps.SAT_RAW,
+                   "report_html": steps.REPORT_HTML if (workdir / steps.REPORT_HTML).is_file() else None},
             input={"path": run["input_path"], "size_bytes": run["input_size"], "sha256": run["sha256"],
                    "points": run["input_points"], "ground_source": measure.get("ground_source"),
                    "crs": _crs_name(run, workdir)},

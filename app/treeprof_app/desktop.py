@@ -35,6 +35,11 @@ def open_folder(folder) -> bool:
         return False
 
 
+def open_file(path) -> bool:
+    """Open a file with its usual program (a .html report: the web browser)."""
+    return open_folder(path)
+
+
 def reveal_file(path) -> bool:
     """Open File Explorer with this file selected."""
     try:

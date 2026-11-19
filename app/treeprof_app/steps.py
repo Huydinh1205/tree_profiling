@@ -16,9 +16,9 @@ from typing import Optional, Sequence, Union
 
 from . import lasheader
 
-STEP_ORDER = ("copy", "find_trees", "join", "measure", "prepare_view")
+STEP_ORDER = ("copy", "find_trees", "join", "measure", "report", "prepare_view")
 STEP_LABELS = {"copy": "Copy file", "find_trees": "Find trees", "join": "Join split crowns",
-               "measure": "Measure trees", "prepare_view": "Prepare view"}
+               "measure": "Measure trees", "report": "Write report", "prepare_view": "Prepare view"}
 SCRIPT_STEPS = ("find_trees", "join", "measure")       # steps done by a script of ../processes
 DEFAULT_MAX_POINTS = 20_000_000                        # sat_docker.py MAX_POINTS
 
@@ -27,12 +27,15 @@ SAT_MERGED = "sat_result_merged.laz"
 INFO_LAZ = "sat_result_merged_info.laz"
 TREES_CSV = "sat_result_merged_trees.csv"
 CROWNS_SHP = "sat_result_merged_crowns.shp"
+REPORT_DIR = "report"                                  # what process2_segment.py writes (figures, report.md)
+REPORT_HTML = "report.html"                            # the report the app makes from it (RES-11)
 SAT_LOG = os.path.join("log", "sat_docker.log")
 
 _OUTPUTS = {
     "find_trees": (SAT_RAW,),
     "join": (SAT_MERGED,),
     "measure": (INFO_LAZ, TREES_CSV, CROWNS_SHP, "sat_result_merged_crowns.shx", "sat_result_merged_crowns.dbf"),
+    "report": (os.path.join(REPORT_DIR, "report.md"),),
 }
 _SAME_POINTS = {"find_trees": (SAT_RAW,), "join": (SAT_MERGED,), "measure": (INFO_LAZ,)}
 
@@ -54,6 +57,12 @@ def command(step: str, *, python: Union[str, Sequence[str]], workdir, input_path
         cmd = py + ["tree_info.py", str(w / SAT_MERGED)]
         if site:
             cmd += ["--site", site]
+        return cmd
+    if step == "report":                               # the report step 3/3 of run_segmentanytree.bat writes
+        cmd = py + ["process2_segment.py", str(input_path), "--out", str(w / REPORT_DIR), "--models", "chm_watershed",
+                    "--external", f"sat={w / SAT_RAW}", f"sat_merged={w / SAT_MERGED}"]
+        if site:
+            cmd += ["--site-name", site]
         return cmd
     raise ValueError(f"{step} is not a script step")
 

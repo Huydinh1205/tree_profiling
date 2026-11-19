@@ -367,7 +367,9 @@ class ResultsView(QWidget):
         self.head = QVBoxLayout()
         outer.addLayout(self.head)
         self.show_head()
-        for _, p in res.missing_optional:
+        for key, p in res.missing_optional:
+            if key != "info_laz":
+                continue
             outer.addWidget(label(f"{p.name} is not in this folder, so the 3D view is not available.", name="missing"))
 
         tabs = QTabWidget()
@@ -396,6 +398,11 @@ class ResultsView(QWidget):
         if self.state.settings.cloudcompare and self.res.info_laz:
             right.append(button("Open in CloudCompare", self.cloudcompare, name="cloudcompare"))
         right.append(button("Open folder", lambda: desktop.open_folder(self.res.folder), name="open_folder"))
+        report_path = self.res.paths.get("report_html")
+        if report_path and report_path.is_file():                                   # RES-11
+            right.append(button("Open report", lambda: desktop.open_file(report_path), name="open_report",
+                                tip="The report as a web page: SegmentAnyTree before and after joining crowns, "
+                                    "figures and the trees to check. It is saved with the results."))
         right.append(button("Save" if self.from_workdir else "Save a copy", self.save, "primary", name="save"))
         self.head.addLayout(row(
             button("‹  Back to runs", self.win.go_home, "flat", name="back"),
