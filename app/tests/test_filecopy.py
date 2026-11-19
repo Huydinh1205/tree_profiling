@@ -74,6 +74,38 @@ class Copy(unittest.TestCase):
         self.copy()
         self.assertEqual(self.dst.read_bytes(), self.data)
 
+    def test_destination_held_for_a_moment_by_windows(self):                    # antivirus / indexer lock
+        self.dst.parent.mkdir(parents=True)
+        self.dst.write_bytes(b"old")
+        real, tries = os.replace, []
+
+        def locked_twice(a, b):
+            tries.append(1)
+            if len(tries) <= 2:
+                raise PermissionError(5, "Access is denied")
+            real(a, b)
+
+        fc.os.replace = locked_twice
+        self.addCleanup(setattr, fc.os, "replace", real)
+        self.copy()
+        self.assertEqual(self.dst.read_bytes(), self.data)
+        self.assertEqual((len(tries), self.waits), (3, [fc.REPLACE_WAIT, fc.REPLACE_WAIT]))
+        self.assertEqual(self.leftovers(), ["cloud.laz"])
+
+    def test_destination_locked_for_good_gives_a_clear_error(self):
+        real = os.replace
+
+        def locked(a, b):
+            raise PermissionError(5, "Access is denied")
+
+        fc.os.replace = locked
+        self.addCleanup(setattr, fc.os, "replace", real)
+        with self.assertRaises(fc.CopyError) as cm:
+            self.copy()
+        self.assertIn("Cannot finish writing cloud.laz", str(cm.exception))
+        self.assertEqual(len(self.waits), fc.REPLACE_TRIES - 1)
+        self.assertEqual(self.leftovers(), [])
+
     def test_connection_drops_then_copy_goes_on(self):
         calls = []
 

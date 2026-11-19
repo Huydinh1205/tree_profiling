@@ -11,6 +11,8 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
+from .filecopy import replace_retrying
+
 FORMAT = "treeprof"
 FORMAT_VERSION = 1
 EXTENSION = ".treeprof"
@@ -80,7 +82,7 @@ def write_project(path, data: dict) -> Path:
         f.write("\n")
         f.flush()
         os.fsync(f.fileno())
-    os.replace(part, path)
+    replace_retrying(part, path)
     return path
 
 

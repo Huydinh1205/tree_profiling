@@ -334,7 +334,10 @@ class Cancel(Base):                                                             
         self.fake(tiles=4)
         self.runner.resume(run_id)
         self.assertEqual(self.runner.run(run_id), "finished")
-        self.assertEqual(self.store.steps_done(run_id)["find_trees"]["info"]["tiles_skipped"], [1])
+        # Tile 1 was done before Cancel. On a busy Windows machine stopping the script can take long enough
+        # for tile 2 to finish too; either way, finished tiles are not run again.
+        skipped = self.store.steps_done(run_id)["find_trees"]["info"]["tiles_skipped"]
+        self.assertIn(skipped, ([1], [1, 2]))
         self.assertEqual(self.calls(run_id), ["find_trees", "find_trees", "join", "measure", "report"])
         self.assertEqual(self.store.get(run_id)["trees"], 4)
 

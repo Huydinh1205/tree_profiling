@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Callable, Optional
 
 CHUNK = 8 * 1024 * 1024
+REPLACE_TRIES = 10            # Windows: an antivirus or the search indexer can hold a new file for a moment
+REPLACE_WAIT = 0.5            # seconds between tries
 
 
 class CopyError(Exception):
@@ -37,6 +39,19 @@ def _remove(path: Path) -> None:
         path.unlink()
     except OSError:
         pass
+
+
+def replace_retrying(part, dst, sleep: Callable[[float], None] = time.sleep) -> None:
+    """os.replace that tries again for a few seconds when Windows says "Access is denied": right after a
+    file is written or replaced, an antivirus scan or the search indexer may still have it open."""
+    for i in range(REPLACE_TRIES):
+        try:
+            os.replace(part, dst)
+            return
+        except PermissionError:
+            if i == REPLACE_TRIES - 1:
+                raise
+            sleep(REPLACE_WAIT)
 
 
 def copy_with_hash(src, dst, *, progress: Optional[Callable[[int, int], None]] = None,
@@ -95,7 +110,7 @@ def copy_with_hash(src, dst, *, progress: Optional[Callable[[int, int], None]] =
         _remove(part)
         raise CopyError(f"{src.name}: copied {done:,} of {size:,} bytes.")
     try:
-        os.replace(part, dst)
+        replace_retrying(part, dst, sleep)
         if dst.stat().st_size != size:
             raise OSError("size differs after the copy")
     except OSError as e:
