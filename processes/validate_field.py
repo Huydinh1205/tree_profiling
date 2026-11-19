@@ -127,7 +127,7 @@ def line(rows, title, ours, ref, unit="m"):
     if ref.startswith("field_crown_base"): ok &= b < np.array([r["height_m"] for r in rows]) + 1   # typing slips
     if ok.sum() < 3: return
     a, b = a[ok], b[ok]; e = a - b
-    print(f"  {title:58s} {ok.sum():5d}  {e.mean():+7.2f}  {np.median(np.abs(e)):7.2f}  {np.sqrt((e ** 2).mean()):6.2f}  "
+    print(f"  {title:58s} {ok.sum():5d}  {e.mean():+7.2f}  {np.abs(e).mean():7.2f}  {np.median(np.abs(e)):7.2f}  "
           f"{100 * np.median(np.abs(e) / b):6.1f}%  {np.corrcoef(a, b)[0, 1]:5.2f}   ({unit})")
 
 
@@ -157,7 +157,7 @@ def pairs(rows, ours, ref):
 
 def stats(p):
     a = np.array([q[1] for q in p]); b = np.array([q[2] for q in p]); e = a - b
-    return dict(n=len(p), bias=e.mean(), med=np.median(np.abs(e)), rmse=np.sqrt((e ** 2).mean()),
+    return dict(n=len(p), bias=e.mean(), med=np.median(np.abs(e)), mae=np.abs(e).mean(),
                 pct=100 * np.median(np.abs(e) / b), r=np.corrcoef(a, b)[0, 1] if len(p) > 2 else np.nan)
 
 
@@ -204,7 +204,7 @@ def write_report(rows, path):
         if len(p) < 3: continue
         s = stats(p)
         summary.append(f"<tr><th>{label}</th><td class='t'>{Hm.escape(what)}</td><td>{s['n']:,}</td><td>{fmt(s['bias'], 2, True)}</td>"
-                       f"<td><b>{fmt(s['med'])}</b></td><td>{fmt(s['pct'], 1)}%</td><td>{fmt(s['rmse'])}</td>"
+                       f"<td>{fmt(s['mae'])}</td><td><b>{fmt(s['med'])}</b></td><td>{fmt(s['pct'], 1)}%</td>"
                        f"<td>{fmt(s['r'])}</td><td>{unit}</td></tr>")
         cards.append(f'<div class="card"><h3>{label}</h3><p class="sub">vs {Hm.escape(what)} · {s["n"]:,} trees · '
                      f'typical error {fmt(s["med"])} {unit} ({fmt(s["pct"], 0)}%)</p>{scatter_svg(p, unit)}</div>')
@@ -265,12 +265,15 @@ border-radius:6px;padding:6px 9px;font-size:13px;box-shadow:0 2px 10px rgba(0,0,
 ground (<a href="https://doi.org/10.1594/PANGAEA.942856">Weiser et al. 2022</a>). Measured with the same code as the app
 (treeseg.tree_table). Made {datetime.date.today():%d %b %Y}.</p>
 <p class="note">The trees are already separated, so this checks only how each tree is measured, not how trees are found.
-Error = ours minus field. "Typical error" is the median: half the trees are closer than this.</p>
+Error = ours minus field.</p>
 
 <h2>Summary</h2>
-<table><thead><tr><th>Measurement</th><th class='t'>Field value</th><th>Trees</th><th>Bias</th><th>Typical error</th><th>Typical error %</th>
-<th>RMSE</th><th>r</th><th>Unit</th></tr></thead><tbody>{''.join(summary)}</tbody></table>
-<p class="note">Bias: average error, + means ours is higher. RMSE weighs large errors more. r: 1 means the same ordering as the field.
+<table><thead><tr><th>Measurement</th><th class='t'>Field value</th><th>Trees</th><th>Bias</th><th>Average error</th><th>Typical error</th><th>Typical error %</th>
+<th>r</th><th>Unit</th></tr></thead><tbody>{''.join(summary)}</tbody></table>
+<p class="note">Bias: the errors averaged WITH their sign, + means ours is higher on the whole. A tree 5 m too high and one 5 m
+too low give a bias of 0, so bias only says whether we lean one way. How far off the trees are is in the next two columns, which
+drop the sign first: average error is the mean distance from the field value, typical error the median (half the trees are closer).
+Average error above typical error means a few trees are far off. r: 1 means the same ordering as the field.
 Crown area has no field measurement: it is compared with a circle of the field crown diameter, so its % error is about twice the
 diameter's. Canopy density: a value for {int(np.isfinite(d).sum()):,} of {len(d):,} trees, median {np.nanmedian(d):.0f}% (no field value).</p>
 
@@ -322,7 +325,7 @@ def main():
         w = csv.DictWriter(f, list(rows[0])); w.writeheader(); w.writerows(rows)
     print(f"\n{len(rows)} trees with a leaf-on drone cloud, compared with what was measured in the field. "
           f"error = ours - field")
-    print(f"  {'':58s} trees     bias  median   RMSE  median      r\n  {'':58s}               |error|         |error|%")
+    print(f"  {'':58s} trees     bias    mean  median  median      r\n  {'':58s}                |error| |error| |error|%")
     line(rows, "height (field: hypsometer, about 1 tree in 10)", "height_m", "field_height_m")
     line(rows, "crown diameter (field: dripline, 2 directions, mean)", "crown_diam_m", "field_crown_diam_m")
     line(rows, "crown width, widest (vs the field crown diameter)", "crown_width_max_m", "field_crown_diam_m")
